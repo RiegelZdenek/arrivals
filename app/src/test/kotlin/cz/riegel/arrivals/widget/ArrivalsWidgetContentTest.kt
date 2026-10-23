@@ -22,7 +22,7 @@ class ArrivalsWidgetContentTest {
             Departure(
                 id = "dep_$i",
                 line = Line("$i", TransportMode.Tram),
-                headsign = "Destination $i",
+                headsign = "Headsign $i",
                 scheduledTime = Instant.now(),
                 predictedTime = Instant.now(),
                 countdown = CountdownDisplay(i.toLong(), "$i min", false),

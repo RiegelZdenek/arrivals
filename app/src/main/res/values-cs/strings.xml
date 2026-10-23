@@ -7,12 +7,16 @@
     <string name="test_connection">Ověřit připojení</string>
     <string name="save_settings">Uložit nastavení</string>
     <string name="search_radius_label">Poloměr hledání (metry)</string>
-    <string name="setup_required">Nutné nastavení: Klepněte pro zadání Golemio API klíče</string>
+    <string name="refresh_interval_label">Interval obnovení (minuty)</string>
+    <string name="setup_required_title">Nutné nastavení</string>
+    <string name="setup_required">Klepněte pro zadání Golemio API klíče</string>
     <string name="cached_warning">Uloženo %1$s • Klepněte pro obnovení</string>
     <string name="no_departures">Žádné nadcházející odjezdy</string>
     <string name="no_stops_found">V okolí nebyly nalezeny žádné zastávky</string>
     <string name="locating">Hledání nejbližší zastávky…</string>
     <string name="refresh">Obnovit</string>
+    <string name="tap_to_refresh">↻ Klepněte pro obnovení</string>
+    <string name="retry">↻ Opakovat</string>
     <string name="min_unit">min</string>
     <string name="less_than_one_min">&lt;1 min</string>
 </resources>

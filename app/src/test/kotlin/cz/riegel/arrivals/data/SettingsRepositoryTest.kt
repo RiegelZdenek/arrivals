@@ -49,18 +49,17 @@ class SettingsRepositoryTest {
     }
 
     @Test
-    fun validateApiKey_returnsSuccessOnValidKey() = runBlocking {
-        val fakeClient = object : ApiValidator {
-            override suspend fun testKey(key: String): Result<Boolean> {
-                return if (key == "valid-key") Result.success(true)
-                else Result.failure(GolemioException.Unauthorized)
-            }
-        }
+    fun refreshInterval_defaultsTo15AndCanBeUpdated() {
+        assertEquals(15L, settingsRepository.getRefreshIntervalMinutes())
 
-        val success = settingsRepository.validateApiKey("valid-key", fakeClient)
-        assertTrue(success.isSuccess)
+        settingsRepository.saveRefreshIntervalMinutes(30L)
+        assertEquals(30L, settingsRepository.getRefreshIntervalMinutes())
+    }
 
-        val fail = settingsRepository.validateApiKey("invalid-key", fakeClient)
-        assertTrue(fail.isFailure)
+    @Test
+    fun validateApiKey_failsOnBlankKey() = runBlocking {
+        val result = settingsRepository.validateApiKey("   ")
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull() is GolemioException.MissingApiKey)
     }
 }

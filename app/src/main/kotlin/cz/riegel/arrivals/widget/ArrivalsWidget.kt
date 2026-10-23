@@ -5,16 +5,19 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
+import androidx.glance.LocalContext
+import androidx.glance.LocalSize
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionParametersOf
-import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
@@ -34,6 +37,7 @@ import androidx.glance.layout.width
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
+import cz.riegel.arrivals.R
 import cz.riegel.arrivals.domain.ArrivalsViewState
 import cz.riegel.arrivals.domain.model.Departure
 import cz.riegel.arrivals.domain.model.Platform
@@ -41,6 +45,14 @@ import cz.riegel.arrivals.domain.model.TransportMode
 import cz.riegel.arrivals.ui.settings.SettingsActivity
 
 class ArrivalsWidget : GlanceAppWidget() {
+
+    override val sizeMode: SizeMode = SizeMode.Responsive(
+        setOf(
+            DpSize(180.dp, 110.dp), // Compact 2x2
+            DpSize(260.dp, 180.dp), // Standard 3x2
+            DpSize(340.dp, 250.dp)  // Large
+        )
+    )
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val state = WidgetStateManager.getState(context)
@@ -90,7 +102,12 @@ class RefreshActionCallback : ActionCallback {
 
 @Composable
 fun ArrivalsWidgetContent(state: ArrivalsViewState) {
+    val context = LocalContext.current
+    val size = LocalSize.current
     val darkBackground = Color(0xFF16151A)
+
+    // Responsive departures count: compact (height < 180dp) displays 3, larger displays 5-6 (Spec 15)
+    val maxDepartures = if (size.height < 180.dp) 3 else 6
 
     Box(
         modifier = GlanceModifier
@@ -106,7 +123,7 @@ fun ArrivalsWidgetContent(state: ArrivalsViewState) {
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = state.message,
+                        text = context.getString(R.string.locating),
                         style = TextStyle(color = androidx.glance.unit.ColorProvider(Color.LightGray), fontSize = 14.sp)
                     )
                 }
@@ -116,17 +133,17 @@ fun ArrivalsWidgetContent(state: ArrivalsViewState) {
                     modifier = GlanceModifier
                         .fillMaxSize()
                         .padding(8.dp)
-                        .clickable(actionStartActivity<SettingsActivity>()),
+                        .clickable(actionStartActivity(Intent(context, SettingsActivity::class.java))),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = state.title,
+                        text = context.getString(R.string.setup_required_title),
                         style = TextStyle(color = androidx.glance.unit.ColorProvider(Color.White), fontWeight = FontWeight.Bold, fontSize = 15.sp)
                     )
                     Spacer(modifier = GlanceModifier.height(4.dp))
                     Text(
-                        text = state.message,
+                        text = context.getString(R.string.setup_required),
                         style = TextStyle(color = androidx.glance.unit.ColorProvider(Color(0xFFE5A93C)), fontSize = 13.sp)
                     )
                 }
@@ -138,12 +155,12 @@ fun ArrivalsWidgetContent(state: ArrivalsViewState) {
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = state.message,
+                        text = context.getString(R.string.no_stops_found),
                         style = TextStyle(color = androidx.glance.unit.ColorProvider(Color.LightGray), fontSize = 14.sp)
                     )
                     Spacer(modifier = GlanceModifier.height(8.dp))
                     Text(
-                        text = "↻ Tap to refresh",
+                        text = context.getString(R.string.tap_to_refresh),
                         modifier = GlanceModifier.clickable(actionRunCallback<RefreshActionCallback>()),
                         style = TextStyle(color = androidx.glance.unit.ColorProvider(Color(0xFF81B0FF)), fontSize = 13.sp)
                     )
@@ -162,7 +179,7 @@ fun ArrivalsWidgetContent(state: ArrivalsViewState) {
                     if (state.canRetry) {
                         Spacer(modifier = GlanceModifier.height(6.dp))
                         Text(
-                            text = "↻ Retry",
+                            text = context.getString(R.string.retry),
                             modifier = GlanceModifier.clickable(actionRunCallback<RefreshActionCallback>()),
                             style = TextStyle(color = androidx.glance.unit.ColorProvider(Color.White), fontSize = 13.sp)
                         )
@@ -171,7 +188,7 @@ fun ArrivalsWidgetContent(state: ArrivalsViewState) {
             }
             is ArrivalsViewState.Content -> {
                 Column(modifier = GlanceModifier.fillMaxSize()) {
-                    // Cached warning banner if present
+                    // Cached warning banner if present (Spec 14)
                     if (!state.cachedWarning.isNullOrBlank()) {
                         Row(
                             modifier = GlanceModifier
@@ -204,11 +221,11 @@ fun ArrivalsWidgetContent(state: ArrivalsViewState) {
                         Spacer(modifier = GlanceModifier.height(6.dp))
                     }
 
-                    // Departures List (compact 3 to standard 6)
-                    val departures = state.activeDepartures.take(6)
+                    // Departures List (responsive compact vs standard)
+                    val departures = state.activeDepartures.take(maxDepartures)
                     if (departures.isEmpty()) {
                         Text(
-                            text = "No upcoming departures",
+                            text = context.getString(R.string.no_departures),
                             style = TextStyle(color = androidx.glance.unit.ColorProvider(Color.Gray), fontSize = 12.sp),
                             modifier = GlanceModifier.padding(vertical = 8.dp)
                         )
@@ -236,7 +253,7 @@ fun HeaderRow(state: ArrivalsViewState.Content) {
         // Stop Name (clickable to map)
         Text(
             text = activeStop.name,
-            modifier = GlanceModifier.clickable(androidx.glance.appwidget.action.actionStartActivity(mapIntent)),
+            modifier = GlanceModifier.clickable(actionStartActivity(mapIntent)),
             style = TextStyle(
                 color = androidx.glance.unit.ColorProvider(Color.White),
                 fontWeight = FontWeight.Bold,
@@ -361,7 +378,7 @@ fun DepartureRowItem(departure: Departure) {
         )
         Spacer(modifier = GlanceModifier.width(8.dp))
 
-        // Headsign destination
+        // Headsign
         Text(
             text = departure.headsign,
             style = TextStyle(color = androidx.glance.unit.ColorProvider(Color(0xFFE0E0E0)), fontSize = 13.sp)

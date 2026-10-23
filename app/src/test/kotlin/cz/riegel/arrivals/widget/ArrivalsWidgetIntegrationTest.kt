@@ -3,6 +3,7 @@ package cz.riegel.arrivals.widget
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import cz.riegel.arrivals.domain.ArrivalsViewState
+import cz.riegel.arrivals.domain.model.Coordinates
 import cz.riegel.arrivals.domain.model.CountdownDisplay
 import cz.riegel.arrivals.domain.model.Delay
 import cz.riegel.arrivals.domain.model.Departure
@@ -67,7 +68,8 @@ class ArrivalsWidgetIntegrationTest {
             ArrivalsViewState.Content(
                 stops = listOf(stop1, stop2),
                 activeStopIndex = 0,
-                activePlatformCode = "A"
+                activePlatformCode = "A",
+                userCoordinates = Coordinates(50.075, 14.430)
             )
         )
 

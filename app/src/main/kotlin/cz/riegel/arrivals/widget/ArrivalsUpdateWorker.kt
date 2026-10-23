@@ -22,6 +22,7 @@ import cz.riegel.arrivals.domain.ArrivalsAction
 import cz.riegel.arrivals.domain.ArrivalsEngine
 import cz.riegel.arrivals.domain.ArrivalsViewState
 import cz.riegel.arrivals.domain.DepartureNormalizer
+import cz.riegel.arrivals.domain.model.Coordinates
 import kotlinx.coroutines.tasks.await
 import java.time.Instant
 import java.util.concurrent.TimeUnit
@@ -48,7 +49,7 @@ class ArrivalsUpdateWorker(
         val apiClient = GolemioApiClient(apiKeyProvider = { apiKey })
         val now = Instant.now()
 
-        // 1. Resolve coordinates (GPS or 30-min underground fallback)
+        // 1. Resolve coordinates (GPS or 30-min underground fallback per ADR-0003)
         val freshLocation = getFreshLocation()
         val cachedCoords = cacheRepository.getLastCoordinates()
         val resolvedCoords = locationStrategy.resolveCoordinates(
@@ -58,7 +59,7 @@ class ArrivalsUpdateWorker(
         )
 
         if (resolvedCoords == null) {
-            handleLocationFailure(now)
+            handleNoValidLocation(now)
             return Result.success()
         }
 
@@ -66,6 +67,8 @@ class ArrivalsUpdateWorker(
         if (!resolvedCoords.isStaleUndergroundFallback) {
             cacheRepository.saveLastCoordinates(resolvedCoords)
         }
+
+        val userCoords = Coordinates(lat = resolvedCoords.lat, lon = resolvedCoords.lon)
 
         // 2. Fetch live departures with adaptive radius expansion
         val preferredRadius = settingsRepository.getSearchRadius()
@@ -92,7 +95,7 @@ class ArrivalsUpdateWorker(
                 }
             } else {
                 lastError = responseResult.exceptionOrNull()
-                break // Don't loop radius on network / auth errors
+                break
             }
         }
 
@@ -100,17 +103,12 @@ class ArrivalsUpdateWorker(
             cacheRepository.saveLastResponse(apiSuccessResponse, now)
             val stops = normalizer.normalize(apiSuccessResponse, referenceTime = now)
 
-            val cachedBanner = if (resolvedCoords.isStaleUndergroundFallback) {
-                "Underground GPS (30m fix)"
-            } else null
-
             val updatedState = engine.reduce(
                 WidgetStateManager.getState(appContext),
                 ArrivalsAction.UpdateData(
                     stops = stops,
-                    userLat = resolvedCoords.lat,
-                    userLon = resolvedCoords.lon,
-                    cachedWarning = cachedBanner
+                    userCoordinates = userCoords,
+                    cachedWarning = null
                 )
             )
 
@@ -120,40 +118,24 @@ class ArrivalsUpdateWorker(
         }
 
         // 3. Network or Rate Limit failure resilience: fall back to cached departures
-        handleNetworkFailure(now, lastError)
+        restoreCachedDepartures(now = now, userCoords = userCoords, fallbackErrorMessage = lastError?.message)
         return Result.success()
     }
 
-    private suspend fun handleNetworkFailure(now: Instant, error: Throwable?) {
-        val cached = cacheRepository.getLastResponse()
-        if (cached != null) {
-            val (cachedResponse, cachedTime) = cached
-            val stops = normalizer.normalize(cachedResponse, referenceTime = now)
-            val warningBanner = CacheResilience.formatCachedWarning(cachedTime)
-
-            val lastCoords = cacheRepository.getLastCoordinates()
-            val lat = lastCoords?.lat ?: 50.08
-            val lon = lastCoords?.lon ?: 14.43
-
-            val updatedState = engine.reduce(
-                WidgetStateManager.getState(appContext),
-                ArrivalsAction.UpdateData(
-                    stops = stops,
-                    userLat = lat,
-                    userLon = lon,
-                    cachedWarning = warningBanner
-                )
-            )
-            WidgetStateManager.setState(appContext, updatedState)
-            WidgetStateManager.updateAllWidgets(appContext)
-        } else {
-            val msg = error?.message ?: "Unable to fetch transit departures"
-            WidgetStateManager.setState(appContext, ArrivalsViewState.Error(msg, canRetry = true))
-            WidgetStateManager.updateAllWidgets(appContext)
-        }
+    private suspend fun handleNoValidLocation(now: Instant) {
+        // GPS failed and no cached location under 30 minutes old
+        restoreCachedDepartures(
+            now = now,
+            userCoords = null,
+            fallbackErrorMessage = "No GPS fix available. Ensure location permissions are enabled."
+        )
     }
 
-    private suspend fun handleLocationFailure(now: Instant) {
+    private suspend fun restoreCachedDepartures(
+        now: Instant,
+        userCoords: Coordinates?,
+        fallbackErrorMessage: String?
+    ) {
         val cached = cacheRepository.getLastResponse()
         if (cached != null) {
             val (cachedResponse, cachedTime) = cached
@@ -164,18 +146,15 @@ class ArrivalsUpdateWorker(
                 WidgetStateManager.getState(appContext),
                 ArrivalsAction.UpdateData(
                     stops = stops,
-                    userLat = 50.08,
-                    userLon = 14.43,
+                    userCoordinates = userCoords,
                     cachedWarning = warningBanner
                 )
             )
             WidgetStateManager.setState(appContext, updatedState)
             WidgetStateManager.updateAllWidgets(appContext)
         } else {
-            WidgetStateManager.setState(
-                appContext,
-                ArrivalsViewState.Error("No location available. Turn on GPS or connect to network.", canRetry = true)
-            )
+            val msg = fallbackErrorMessage ?: "Unable to fetch transit departures"
+            WidgetStateManager.setState(appContext, ArrivalsViewState.Error(msg, canRetry = true))
             WidgetStateManager.updateAllWidgets(appContext)
         }
     }
@@ -217,8 +196,8 @@ class ArrivalsUpdateWorker(
             )
         }
 
-        fun schedulePeriodicWork(context: Context) {
-            val request = PeriodicWorkRequestBuilder<ArrivalsUpdateWorker>(15, TimeUnit.MINUTES)
+        fun schedulePeriodicWork(context: Context, intervalMinutes: Long = 15) {
+            val request = PeriodicWorkRequestBuilder<ArrivalsUpdateWorker>(intervalMinutes, TimeUnit.MINUTES)
                 .setConstraints(
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)
@@ -228,7 +207,7 @@ class ArrivalsUpdateWorker(
 
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(
                 WORK_NAME_PERIODIC,
-                ExistingPeriodicWorkPolicy.KEEP,
+                ExistingPeriodicWorkPolicy.UPDATE,
                 request
             )
         }

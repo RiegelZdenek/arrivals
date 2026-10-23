@@ -2,6 +2,11 @@ package cz.riegel.arrivals.domain.model
 
 import java.time.Instant
 
+data class Coordinates(
+    val lat: Double,
+    val lon: Double
+)
+
 enum class TransportMode {
     Metro,
     Tram,

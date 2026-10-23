@@ -18,6 +18,7 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var settingsRepository: SettingsRepository
     private lateinit var editApiKey: EditText
     private lateinit var editRadius: EditText
+    private lateinit var editInterval: EditText
     private lateinit var btnTestConnection: Button
     private lateinit var btnSave: Button
     private lateinit var textTestResult: TextView
@@ -30,6 +31,7 @@ class SettingsActivity : AppCompatActivity() {
 
         editApiKey = findViewById(R.id.editApiKey)
         editRadius = findViewById(R.id.editRadius)
+        editInterval = findViewById(R.id.editInterval)
         btnTestConnection = findViewById(R.id.btnTestConnection)
         btnSave = findViewById(R.id.btnSave)
         textTestResult = findViewById(R.id.textTestResult)
@@ -37,6 +39,7 @@ class SettingsActivity : AppCompatActivity() {
         // Load existing settings
         settingsRepository.getApiKey()?.let { editApiKey.setText(it) }
         editRadius.setText(settingsRepository.getSearchRadius().toString())
+        editInterval.setText(settingsRepository.getRefreshIntervalMinutes().toString())
 
         btnTestConnection.setOnClickListener {
             testApiConnection()
@@ -80,13 +83,16 @@ class SettingsActivity : AppCompatActivity() {
     private fun saveSettings() {
         val key = editApiKey.text.toString().trim()
         val radius = editRadius.text.toString().toIntOrNull() ?: SettingsRepository.DEFAULT_SEARCH_RADIUS
+        val interval = editInterval.text.toString().toLongOrNull() ?: SettingsRepository.DEFAULT_REFRESH_INTERVAL
 
         settingsRepository.saveApiKey(key)
         settingsRepository.saveSearchRadius(radius)
+        settingsRepository.saveRefreshIntervalMinutes(interval)
 
         Toast.makeText(this, "Settings saved", Toast.LENGTH_SHORT).show()
 
-        // Trigger immediate background update of widgets
+        // Reschedule periodic work with updated interval and enqueue one-time work
+        ArrivalsUpdateWorker.schedulePeriodicWork(this, interval)
         ArrivalsUpdateWorker.enqueueOneTimeWork(this)
         finish()
     }

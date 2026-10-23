@@ -30,28 +30,30 @@ class DepartureNormalizer(
         val departuresByStop = dto.departures.groupBy { it.stop.name }
 
         return departuresByStop.map { (stopName, stopDepartures) ->
-            // Group departures for this stop by platform code or fallback
+            // Group departures for this stop by physical platform pole ID
             val departuresByPlatform = stopDepartures.groupBy { dep ->
-                val platformCode = dep.stop.platformCode?.trim()
-                if (!platformCode.isNullOrEmpty()) {
+                dep.stop.id.ifEmpty { dep.stop.platformCode.orEmpty() }
+            }
+
+            val platforms = departuresByPlatform.map { (platformId, platformDepartures) ->
+                val firstDep = platformDepartures.first()
+                val stopInfo = stopsByIdOrName[firstDep.stop.id]
+
+                val platformCode = firstDep.stop.platformCode?.trim()
+                val displayCode = if (!platformCode.isNullOrEmpty()) {
                     platformCode
                 } else {
                     // Fallback to primary headsign (e.g., "→ Centrum") per User Story 4
-                    "→ ${dep.trip.headsign.trim()}"
+                    "→ ${firstDep.trip.headsign.trim()}"
                 }
-            }
-
-            val platforms = departuresByPlatform.map { (platformCode, platformDepartures) ->
-                val firstDep = platformDepartures.first()
-                val stopInfo = stopsByIdOrName[firstDep.stop.id]
 
                 val normalizedDepartures = platformDepartures.mapNotNull { depDto ->
                     normalizeDeparture(depDto, referenceTime)
                 }.sortedBy { it.predictedTime }
 
                 Platform(
-                    id = firstDep.stop.id.ifEmpty { platformCode },
-                    code = platformCode,
+                    id = platformId,
+                    code = displayCode,
                     lat = stopInfo?.stopLat ?: 0.0,
                     lon = stopInfo?.stopLon ?: 0.0,
                     departures = normalizedDepartures

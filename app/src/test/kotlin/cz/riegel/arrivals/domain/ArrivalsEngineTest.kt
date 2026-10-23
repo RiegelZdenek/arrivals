@@ -1,5 +1,6 @@
 package cz.riegel.arrivals.domain
 
+import cz.riegel.arrivals.domain.model.Coordinates
 import cz.riegel.arrivals.domain.model.CountdownDisplay
 import cz.riegel.arrivals.domain.model.Delay
 import cz.riegel.arrivals.domain.model.Departure
@@ -17,8 +18,7 @@ class ArrivalsEngineTest {
 
     private val engine = ArrivalsEngine()
 
-    private val userLat = 50.0755
-    private val userLon = 14.4302
+    private val userCoords = Coordinates(lat = 50.0755, lon = 14.4302)
 
     private fun sampleDeparture(headsign: String) = Departure(
         id = "dep_1",
@@ -36,14 +36,14 @@ class ArrivalsEngineTest {
             id = "stop_far",
             name = "Karlovo náměstí",
             lat = 50.0760,
-            lon = 14.4200, // further away
+            lon = 14.4200,
             platforms = listOf(Platform("p1", "A", 50.0760, 14.4200, listOf(sampleDeparture("Spálená"))))
         )
         val stopNear = Stop(
             id = "stop_near",
             name = "I. P. Pavlova",
             lat = 50.0754,
-            lon = 14.4301, // ~15m away
+            lon = 14.4301,
             platforms = listOf(
                 Platform("p_a", "A", 50.0754, 14.4301, listOf(sampleDeparture("Bílá Hora"))),
                 Platform("p_b", "B", 50.0758, 14.4306, listOf(sampleDeparture("Nádraží Hostivař")))
@@ -52,8 +52,7 @@ class ArrivalsEngineTest {
 
         val processedStops = engine.rankStopsByProximity(
             stops = listOf(stopFar, stopNear),
-            userLat = userLat,
-            userLon = userLon
+            userCoords = userCoords
         )
 
         assertEquals("I. P. Pavlova", processedStops[0].name)
@@ -75,46 +74,44 @@ class ArrivalsEngineTest {
             platforms = listOf(platformA, platformB)
         )
 
-        val selectedPlatform = engine.findClosestPlatform(stop, userLat = 50.0754, userLon = 14.4301)
+        val selectedPlatform = engine.findClosestPlatform(stop, userCoords = Coordinates(50.0754, 14.4301))
         assertEquals("A", selectedPlatform?.code)
     }
 
     @Test
-    fun stateReducer_handlesStopCyclingAndPlatformSelection() {
+    fun stateReducer_handlesStopCyclingWithNearestPlatformSelection() {
         val stop1 = Stop(
             id = "s1", name = "Stop 1",
-            platforms = listOf(Platform("p1", "A"), Platform("p2", "B"))
+            lat = 50.075, lon = 14.430,
+            platforms = listOf(Platform("p1", "A", 50.075, 14.430), Platform("p2", "B", 50.076, 14.431))
         )
         val stop2 = Stop(
             id = "s2", name = "Stop 2",
-            platforms = listOf(Platform("p3", "1"))
+            lat = 50.080, lon = 14.440,
+            platforms = listOf(Platform("p3", "1", 50.080, 14.440), Platform("p4", "2", 50.081, 14.441))
         )
 
         var state = ArrivalsViewState.Content(
             stops = listOf(stop1, stop2),
             activeStopIndex = 0,
-            activePlatformCode = "A"
+            activePlatformCode = "A",
+            userCoordinates = Coordinates(50.080, 14.440)
         )
 
-        // Action: NextStop
+        // Action: NextStop - should auto-select closest platform "1" on Stop 2
         state = engine.reduce(state, ArrivalsAction.NextStop) as ArrivalsViewState.Content
         assertEquals(1, state.activeStopIndex)
         assertEquals("Stop 2", state.activeStop.name)
         assertEquals("1", state.activePlatformCode)
 
-        // Action: NextStop (wraps around)
-        state = engine.reduce(state, ArrivalsAction.NextStop) as ArrivalsViewState.Content
-        assertEquals(0, state.activeStopIndex)
-        assertEquals("Stop 1", state.activeStop.name)
-
         // Action: SelectPlatform
-        state = engine.reduce(state, ArrivalsAction.SelectPlatform("B")) as ArrivalsViewState.Content
-        assertEquals("B", state.activePlatformCode)
+        state = engine.reduce(state, ArrivalsAction.SelectPlatform("2")) as ArrivalsViewState.Content
+        assertEquals("2", state.activePlatformCode)
 
         // Action: PreviousStop
         state = engine.reduce(state, ArrivalsAction.PreviousStop) as ArrivalsViewState.Content
-        assertEquals(1, state.activeStopIndex)
-        assertEquals("Stop 2", state.activeStop.name)
+        assertEquals(0, state.activeStopIndex)
+        assertEquals("Stop 1", state.activeStop.name)
     }
 
     private fun assertTrue(message: String, condition: Boolean) {

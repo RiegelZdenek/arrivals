@@ -7,12 +7,16 @@
     <string name="test_connection">Test Connection</string>
     <string name="save_settings">Save Settings</string>
     <string name="search_radius_label">Search Radius (meters)</string>
-    <string name="setup_required">Setup Required: Tap to configure Golemio API key</string>
+    <string name="refresh_interval_label">Refresh Interval (minutes)</string>
+    <string name="setup_required_title">Setup Required</string>
+    <string name="setup_required">Tap to configure Golemio API key</string>
     <string name="cached_warning">Cached %1$s • Tap to retry</string>
     <string name="no_departures">No upcoming departures</string>
     <string name="no_stops_found">No transit stops found nearby</string>
     <string name="locating">Locating nearest stop…</string>
     <string name="refresh">Refresh</string>
+    <string name="tap_to_refresh">↻ Tap to refresh</string>
+    <string name="retry">↻ Retry</string>
     <string name="min_unit">min</string>
     <string name="less_than_one_min">&lt;1 min</string>
 </resources>

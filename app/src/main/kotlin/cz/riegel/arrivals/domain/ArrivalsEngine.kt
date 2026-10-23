@@ -1,5 +1,6 @@
 package cz.riegel.arrivals.domain
 
+import cz.riegel.arrivals.domain.model.Coordinates
 import cz.riegel.arrivals.domain.model.Platform
 import cz.riegel.arrivals.domain.model.Stop
 import kotlin.math.atan2
@@ -13,11 +14,10 @@ class ArrivalsEngine {
 
     fun rankStopsByProximity(
         stops: List<Stop>,
-        userLat: Double,
-        userLon: Double
+        userCoords: Coordinates
     ): List<Stop> {
         return stops.map { stop ->
-            val dist = calculateDistanceMeters(userLat, userLon, stop.lat, stop.lon)
+            val dist = calculateDistanceMeters(userCoords, Coordinates(stop.lat, stop.lon))
             val rankedPlatforms = stop.platforms.map { platform ->
                 if (platform.lat != 0.0 && platform.lon != 0.0) {
                     platform
@@ -31,14 +31,15 @@ class ArrivalsEngine {
 
     fun findClosestPlatform(
         stop: Stop,
-        userLat: Double,
-        userLon: Double
+        userCoords: Coordinates?
     ): Platform? {
         if (stop.platforms.isEmpty()) return null
+        if (userCoords == null) return stop.platforms.firstOrNull()
+
         return stop.platforms.minByOrNull { platform ->
             val pLat = if (platform.lat != 0.0) platform.lat else stop.lat
             val pLon = if (platform.lon != 0.0) platform.lon else stop.lon
-            calculateDistanceMeters(userLat, userLon, pLat, pLon)
+            calculateDistanceMeters(userCoords, Coordinates(pLat, pLon))
         }
     }
 
@@ -48,14 +49,16 @@ class ArrivalsEngine {
                 if (state !is ArrivalsViewState.Content || state.stops.isEmpty()) return state
                 val nextIndex = (state.activeStopIndex + 1) % state.stops.size
                 val nextStop = state.stops[nextIndex]
-                val defaultPlatform = nextStop.platforms.firstOrNull()?.code.orEmpty()
+                val closestPlatform = findClosestPlatform(nextStop, state.userCoordinates)
+                val defaultPlatform = closestPlatform?.code ?: nextStop.platforms.firstOrNull()?.code.orEmpty()
                 state.copy(activeStopIndex = nextIndex, activePlatformCode = defaultPlatform)
             }
             is ArrivalsAction.PreviousStop -> {
                 if (state !is ArrivalsViewState.Content || state.stops.isEmpty()) return state
                 val prevIndex = if (state.activeStopIndex - 1 < 0) state.stops.size - 1 else state.activeStopIndex - 1
                 val prevStop = state.stops[prevIndex]
-                val defaultPlatform = prevStop.platforms.firstOrNull()?.code.orEmpty()
+                val closestPlatform = findClosestPlatform(prevStop, state.userCoordinates)
+                val defaultPlatform = closestPlatform?.code ?: prevStop.platforms.firstOrNull()?.code.orEmpty()
                 state.copy(activeStopIndex = prevIndex, activePlatformCode = defaultPlatform)
             }
             is ArrivalsAction.SelectPlatform -> {
@@ -66,19 +69,24 @@ class ArrivalsEngine {
                 if (action.stops.isEmpty()) {
                     return ArrivalsViewState.Empty()
                 }
-                val rankedStops = rankStopsByProximity(action.stops, action.userLat, action.userLon)
+                val rankedStops = if (action.userCoordinates != null) {
+                    rankStopsByProximity(action.stops, action.userCoordinates)
+                } else {
+                    action.stops
+                }
                 val primaryStop = rankedStops.first()
-                val closestPlatform = findClosestPlatform(primaryStop, action.userLat, action.userLon)
+                val closestPlatform = findClosestPlatform(primaryStop, action.userCoordinates)
                 ArrivalsViewState.Content(
                     stops = rankedStops,
                     activeStopIndex = 0,
                     activePlatformCode = closestPlatform?.code ?: primaryStop.platforms.firstOrNull()?.code.orEmpty(),
+                    userCoordinates = action.userCoordinates,
                     cachedWarning = action.cachedWarning
                 )
             }
             is ArrivalsAction.Refresh -> {
                 when (state) {
-                    is ArrivalsViewState.Content -> state // retain content while refresh worker runs
+                    is ArrivalsViewState.Content -> state
                     else -> ArrivalsViewState.Loading()
                 }
             }
@@ -86,16 +94,14 @@ class ArrivalsEngine {
     }
 
     fun calculateDistanceMeters(
-        lat1: Double,
-        lon1: Double,
-        lat2: Double,
-        lon2: Double
+        from: Coordinates,
+        to: Coordinates
     ): Int {
         val earthRadius = 6371000.0 // meters
-        val dLat = Math.toRadians(lat2 - lat1)
-        val dLon = Math.toRadians(lon2 - lon1)
+        val dLat = Math.toRadians(to.lat - from.lat)
+        val dLon = Math.toRadians(to.lon - from.lon)
         val a = sin(dLat / 2) * sin(dLat / 2) +
-                cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
+                cos(Math.toRadians(from.lat)) * cos(Math.toRadians(to.lat)) *
                 sin(dLon / 2) * sin(dLon / 2)
         val c = 2 * atan2(sqrt(a), sqrt(1 - a))
         return (earthRadius * c).toInt()

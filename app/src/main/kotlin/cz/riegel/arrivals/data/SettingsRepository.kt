@@ -5,29 +5,6 @@ import android.content.SharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 import cz.riegel.arrivals.data.model.GolemioException
-import okhttp3.OkHttpClient
-
-interface ApiValidator {
-    suspend fun testKey(key: String): Result<Boolean>
-}
-
-class GolemioApiValidator(
-    private val client: GolemioApiClient = GolemioApiClient(apiKeyProvider = { null })
-) : ApiValidator {
-    override suspend fun testKey(key: String): Result<Boolean> {
-        val testClient = GolemioApiClient(
-            apiKeyProvider = { key }
-        )
-        // Ping Prague center (Wenceslas Square: 50.0813, 14.4280) with limit 1
-        val result = testClient.getDepartures(lat = 50.0813, lon = 14.4280, radiusMeters = 300, limit = 1)
-        return if (result.isSuccess) {
-            Result.success(true)
-        } else {
-            val err = result.exceptionOrNull() ?: Exception("Unknown error")
-            Result.failure(err)
-        }
-    }
-}
 
 class SettingsRepository(context: Context) {
 
@@ -55,18 +32,32 @@ class SettingsRepository(context: Context) {
         prefs.edit().putInt(KEY_SEARCH_RADIUS, clamped).apply()
     }
 
+    fun getRefreshIntervalMinutes(): Long {
+        return prefs.getLong(KEY_REFRESH_INTERVAL, DEFAULT_REFRESH_INTERVAL)
+    }
+
+    fun saveRefreshIntervalMinutes(intervalMinutes: Long) {
+        val clamped = intervalMinutes.coerceIn(15, 60)
+        prefs.edit().putLong(KEY_REFRESH_INTERVAL, clamped).apply()
+    }
+
     fun clear() {
         prefs.edit().clear().apply()
     }
 
-    suspend fun validateApiKey(
-        key: String,
-        validator: ApiValidator = GolemioApiValidator()
-    ): Result<Boolean> {
+    suspend fun validateApiKey(key: String): Result<Boolean> {
         if (key.isBlank()) {
             return Result.failure(GolemioException.MissingApiKey)
         }
-        return validator.testKey(key)
+        val testClient = GolemioApiClient(apiKeyProvider = { key })
+        // Test query against Golemio
+        val result = testClient.getDepartures(lat = 50.0813, lon = 14.4280, radiusMeters = 300, limit = 1)
+        return if (result.isSuccess) {
+            Result.success(true)
+        } else {
+            val err = result.exceptionOrNull() ?: Exception("Unknown error")
+            Result.failure(err)
+        }
     }
 
     private fun createEncryptedSharedPreferences(context: Context): SharedPreferences {
@@ -80,7 +71,6 @@ class SettingsRepository(context: Context) {
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
-            // Fallback for Robolectric or environments lacking Android KeyStore
             context.getSharedPreferences(PREFS_FILENAME + "_fallback", Context.MODE_PRIVATE)
         }
     }
@@ -89,6 +79,8 @@ class SettingsRepository(context: Context) {
         private const val PREFS_FILENAME = "arrivals_secure_prefs"
         private const val KEY_API_TOKEN = "golemio_api_token"
         private const val KEY_SEARCH_RADIUS = "search_radius_meters"
+        private const val KEY_REFRESH_INTERVAL = "refresh_interval_minutes"
         const val DEFAULT_SEARCH_RADIUS = 300
+        const val DEFAULT_REFRESH_INTERVAL = 15L
     }
 }

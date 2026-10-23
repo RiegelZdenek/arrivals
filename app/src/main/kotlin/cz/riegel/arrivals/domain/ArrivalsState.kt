@@ -1,5 +1,6 @@
 package cz.riegel.arrivals.domain
 
+import cz.riegel.arrivals.domain.model.Coordinates
 import cz.riegel.arrivals.domain.model.Departure
 import cz.riegel.arrivals.domain.model.Platform
 import cz.riegel.arrivals.domain.model.Stop
@@ -25,6 +26,7 @@ sealed interface ArrivalsViewState {
         val stops: List<Stop>,
         val activeStopIndex: Int = 0,
         val activePlatformCode: String = "",
+        val userCoordinates: Coordinates? = null,
         val cachedWarning: String? = null
     ) : ArrivalsViewState {
         val activeStop: Stop
@@ -49,8 +51,7 @@ sealed interface ArrivalsAction {
     data object Refresh : ArrivalsAction
     data class UpdateData(
         val stops: List<Stop>,
-        val userLat: Double,
-        val userLon: Double,
+        val userCoordinates: Coordinates? = null,
         val cachedWarning: String? = null
     ) : ArrivalsAction
 }
