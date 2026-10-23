@@ -1,0 +1,60 @@
+package cz.riegel.arrivals.domain.model
+
+import java.time.Instant
+
+enum class TransportMode {
+    Metro,
+    Tram,
+    Bus,
+    Trolleybus
+}
+
+data class Line(
+    val name: String,
+    val transportMode: TransportMode
+)
+
+data class Delay(
+    val minutes: Int = 0,
+    val isAvailable: Boolean = false
+) {
+    val isDelayed: Boolean
+        get() = isAvailable && minutes > 0
+
+    val badgeText: String?
+        get() = if (isDelayed) "+$minutes min" else null
+}
+
+data class CountdownDisplay(
+    val minutesRemaining: Long,
+    val displayText: String,
+    val isClockTime: Boolean
+)
+
+data class Departure(
+    val id: String,
+    val line: Line,
+    val headsign: String,
+    val scheduledTime: Instant,
+    val predictedTime: Instant,
+    val countdown: CountdownDisplay,
+    val delay: Delay,
+    val isWheelchairAccessible: Boolean = false
+)
+
+data class Platform(
+    val id: String,
+    val code: String, // e.g., "A", "B", or headsign fallback "→ Centrum"
+    val lat: Double = 0.0,
+    val lon: Double = 0.0,
+    val departures: List<Departure> = emptyList()
+)
+
+data class Stop(
+    val id: String,
+    val name: String,
+    val lat: Double = 0.0,
+    val lon: Double = 0.0,
+    val distanceMeters: Int? = null,
+    val platforms: List<Platform> = emptyList()
+)

@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">Arrivals</string>
+    <string name="widget_name">Prague Transit Arrivals</string>
+    <string name="settings_title">Arrivals Settings</string>
+    <string name="api_token_label">Golemio API Token (X-Access-Token)</string>
+    <string name="api_token_hint">Enter your Golemio API key</string>
+    <string name="test_connection">Test Connection</string>
+    <string name="save_settings">Save Settings</string>
+    <string name="search_radius_label">Search Radius (meters)</string>
+    <string name="setup_required">Setup Required: Tap to configure Golemio API key</string>
+    <string name="cached_warning">Cached %1$s • Tap to retry</string>
+    <string name="no_departures">No upcoming departures</string>
+    <string name="no_stops_found">No transit stops found nearby</string>
+    <string name="locating">Locating nearest stop…</string>
+    <string name="refresh">Refresh</string>
+    <string name="min_unit">min</string>
+    <string name="less_than_one_min">&lt;1 min</string>
+</resources>
