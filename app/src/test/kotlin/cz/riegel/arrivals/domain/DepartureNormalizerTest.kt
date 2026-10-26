@@ -136,4 +136,49 @@ class DepartureNormalizerTest {
         assertEquals(TransportMode.Bus, normalizer.resolveTransportMode(3))
         assertEquals(TransportMode.Trolleybus, normalizer.resolveTransportMode(11))
     }
+
+    @Test
+    fun normalize_resolvesStopNameFromStopsArrayWhenDepartureStopNameIsAbsent() {
+        val dto = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "U754Z1P", stopName = "Prosecká", platformCode = "B")
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = "2026-10-23T16:35:00+02:00",
+                        minutes = "<1"
+                    ),
+                    stop = GolemioDepartureStopDto(id = "U754Z1P", name = "", platformCode = "B"),
+                    route = GolemioRouteDto(shortName = "140", type = 3),
+                    trip = GolemioTripDto(headsign = "Čakovice"),
+                    delay = GolemioDelayDto(isAvailable = false)
+                )
+            )
+        )
+
+        val stops = normalizer.normalize(dto, referenceTime = now)
+        assertEquals(1, stops.size)
+        assertEquals("Prosecká", stops[0].name)
+        assertEquals(1, stops[0].platforms.size)
+        assertEquals("B", stops[0].platforms[0].code)
+        assertEquals(1, stops[0].platforms[0].departures.size)
+        assertEquals("Čakovice", stops[0].platforms[0].departures[0].headsign)
+    }
+
+    @Test
+    fun normalize_handlesEmptyDeparturesWithStopsList() {
+        val dto = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "S1", stopName = "Flora", platformCode = "A")
+            ),
+            departures = emptyList()
+        )
+
+        val stops = normalizer.normalize(dto, referenceTime = now)
+        assertEquals(1, stops.size)
+        assertEquals("Flora", stops[0].name)
+        assertEquals(1, stops[0].platforms.size)
+        assertEquals(0, stops[0].platforms[0].departures.size)
+    }
 }

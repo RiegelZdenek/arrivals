@@ -26,8 +26,36 @@ class DepartureNormalizer(
     ): List<Stop> {
         val stopsByIdOrName = dto.stops.associateBy { it.stopId }
 
-        // Group departures by stop name
-        val departuresByStop = dto.departures.groupBy { it.stop.name }
+        // Group departures by stop name (resolving from stop ID in stops list if dep.stop.name is absent)
+        val departuresByStop = dto.departures.groupBy { dep ->
+            stopsByIdOrName[dep.stop.id]?.stopName?.ifEmpty { null }
+                ?: dep.stop.name.ifEmpty { null }
+                ?: dto.stops.firstOrNull()?.stopName
+                ?: "Zastávka"
+        }
+
+        if (departuresByStop.isEmpty() && dto.stops.isNotEmpty()) {
+            return dto.stops.groupBy { it.stopName }.map { (stopName, platformStops) ->
+                val platforms = platformStops.map { pStop ->
+                    Platform(
+                        id = pStop.stopId,
+                        code = pStop.platformCode ?: "A",
+                        lat = pStop.stopLat,
+                        lon = pStop.stopLon,
+                        departures = emptyList()
+                    )
+                }
+                val first = platformStops.first()
+                Stop(
+                    id = first.stopId,
+                    name = stopName,
+                    lat = first.stopLat,
+                    lon = first.stopLon,
+                    distanceMeters = null,
+                    platforms = platforms
+                )
+            }
+        }
 
         return departuresByStop.map { (stopName, stopDepartures) ->
             // Group departures for this stop by physical platform pole ID
@@ -40,6 +68,7 @@ class DepartureNormalizer(
                 val stopInfo = stopsByIdOrName[firstDep.stop.id]
 
                 val platformCode = firstDep.stop.platformCode?.trim()
+                    ?: stopInfo?.platformCode?.trim()
                 val displayCode = if (!platformCode.isNullOrEmpty()) {
                     platformCode
                 } else {
@@ -61,12 +90,13 @@ class DepartureNormalizer(
             }.sortedBy { it.code }
 
             val primaryStopInfo = stopDepartures.firstNotNullOfOrNull { stopsByIdOrName[it.stop.id] }
+                ?: dto.stops.firstOrNull { it.stopName == stopName }
             val avgLat = primaryStopInfo?.stopLat ?: platforms.firstOrNull()?.lat ?: 0.0
             val avgLon = primaryStopInfo?.stopLon ?: platforms.firstOrNull()?.lon ?: 0.0
 
             Stop(
                 id = primaryStopInfo?.stopId ?: stopName,
-                name = stopName,
+                name = primaryStopInfo?.stopName ?: stopName,
                 lat = avgLat,
                 lon = avgLon,
                 distanceMeters = null,
