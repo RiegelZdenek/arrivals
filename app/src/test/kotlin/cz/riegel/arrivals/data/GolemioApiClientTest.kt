@@ -136,6 +136,41 @@ class GolemioApiClientTest {
     }
 
     @Test
+    fun getDepartures_handlesStringLessThanOneMinute() = runBlocking {
+        val stringMinutesJson = """
+        {
+          "stops": [],
+          "departures": [
+            {
+              "departure_timestamp": {
+                "scheduled": "2026-10-26T15:50:00+01:00",
+                "predicted": "2026-10-26T15:50:00+01:00",
+                "minutes": "<1"
+              },
+              "stop": { "id": "U142Z1", "name": "Hlavní nádraží" },
+              "route": { "short_name": "9", "type": 0 },
+              "trip": { "headsign": "Sídliště Řepy" },
+              "delay": { "is_available": true, "minutes": 0 }
+            }
+          ]
+        }
+        """.trimIndent()
+
+        mockWebServer.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(stringMinutesJson)
+        )
+
+        val result = apiClient.getDeparturesByNames(listOf("Hlavní nádraží"), limit = 1)
+        assertTrue(result.isSuccess)
+        val response = result.getOrThrow()
+        assertEquals(1, response.departures.size)
+        assertEquals("<1", response.departures[0].departureTimestamp.minutes)
+    }
+
+    @Test
     fun getDepartures_handlesHttp401Unauthorized() = runBlocking {
         mockWebServer.enqueue(MockResponse().setResponseCode(401))
 

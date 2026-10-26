@@ -1,7 +1,43 @@
 package cz.riegel.arrivals.data.model
 
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
+
+@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
+object StringOrIntSerializer : KSerializer<String?> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor("StringOrInt", PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: String?) {
+        if (value != null) encoder.encodeString(value) else encoder.encodeNull()
+    }
+
+    override fun deserialize(decoder: Decoder): String? {
+        val jsonInput = decoder as? JsonDecoder
+        if (jsonInput != null) {
+            val element = jsonInput.decodeJsonElement()
+            if (element is JsonPrimitive) {
+                return element.content
+            }
+            if (element is JsonNull) {
+                return null
+            }
+        }
+        return try {
+            decoder.decodeString()
+        } catch (e: Exception) {
+            null
+        }
+    }
+}
 
 @Serializable
 data class GolemioDepartureBoardResponse(
@@ -32,7 +68,8 @@ data class GolemioDepartureDto(
 data class GolemioTimestampDto(
     val scheduled: String = "",
     val predicted: String? = null,
-    val minutes: Int? = null
+    @Serializable(with = StringOrIntSerializer::class)
+    val minutes: String? = null
 )
 
 @Serializable
