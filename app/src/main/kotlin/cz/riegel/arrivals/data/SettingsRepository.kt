@@ -50,8 +50,8 @@ class SettingsRepository(context: Context) {
             return Result.failure(GolemioException.MissingApiKey)
         }
         val testClient = GolemioApiClient(apiKeyProvider = { key })
-        // Test query against Golemio
-        val result = testClient.getDepartures(lat = 50.0813, lon = 14.4280, radiusMeters = 300, limit = 1)
+        // Test query against Golemio with a well-known Prague stop
+        val result = testClient.getDeparturesByNames(listOf("Hlavní nádraží"), limit = 1)
         return if (result.isSuccess) {
             Result.success(true)
         } else {

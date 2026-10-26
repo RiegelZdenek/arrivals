@@ -12,14 +12,47 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 class GolemioApiClient(
-    private val baseUrl: String = "https://api.golemio.cz/v2/departureboards",
+    private val baseUrl: String = "https://api.golemio.cz/v2/pid/departureboards",
     private val apiKeyProvider: () -> String?,
-    private val okHttpClient: OkHttpClient = defaultOkHttpClient()
+    private val okHttpClient: OkHttpClient = defaultOkHttpClient(),
+    private val stopRegistry: StopRegistry = StopRegistry()
 ) {
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
         coerceInputValues = true
+    }
+
+    suspend fun getDeparturesByNames(
+        names: List<String>,
+        limit: Int = 20
+    ): Result<GolemioDepartureBoardResponse> = withContext(Dispatchers.IO) {
+        val apiKey = apiKeyProvider()
+        if (apiKey.isNullOrBlank()) {
+            return@withContext Result.failure(GolemioException.MissingApiKey)
+        }
+
+        if (names.isEmpty()) {
+            return@withContext Result.success(GolemioDepartureBoardResponse())
+        }
+
+        val baseHttpUrl = baseUrl.toHttpUrlOrNull()
+            ?: return@withContext Result.failure(IllegalArgumentException("Invalid base URL: $baseUrl"))
+
+        val urlBuilder = baseHttpUrl.newBuilder()
+            .addQueryParameter("limit", limit.toString())
+
+        names.forEach { name ->
+            urlBuilder.addQueryParameter("names", name)
+        }
+
+        val request = Request.Builder()
+            .url(urlBuilder.build())
+            .addHeader("X-Access-Token", apiKey)
+            .addHeader("Accept", "application/json")
+            .build()
+
+        executeRequest(request)
     }
 
     suspend fun getDepartures(
@@ -33,22 +66,33 @@ class GolemioApiClient(
             return@withContext Result.failure(GolemioException.MissingApiKey)
         }
 
-        val baseHttpUrl = baseUrl.toHttpUrlOrNull()
-            ?: return@withContext Result.failure(IllegalArgumentException("Invalid base URL: $baseUrl"))
+        val nearbyStopNames = stopRegistry.findNearbyStopNames(lat, lon, radiusMeters)
+        if (nearbyStopNames.isEmpty()) {
+            // Also attempt direct lat/lng parameters if supported
+            val baseHttpUrl = baseUrl.toHttpUrlOrNull()
+                ?: return@withContext Result.failure(IllegalArgumentException("Invalid base URL: $baseUrl"))
 
-        val urlBuilder = baseHttpUrl.newBuilder()
-            .addQueryParameter("lat", lat.toString())
-            .addQueryParameter("lng", lon.toString())
-            .addQueryParameter("range", radiusMeters.toString())
-            .addQueryParameter("limit", limit.toString())
+            val request = Request.Builder()
+                .url(
+                    baseHttpUrl.newBuilder()
+                        .addQueryParameter("lat", lat.toString())
+                        .addQueryParameter("lng", lon.toString())
+                        .addQueryParameter("range", radiusMeters.toString())
+                        .addQueryParameter("limit", limit.toString())
+                        .build()
+                )
+                .addHeader("X-Access-Token", apiKey)
+                .addHeader("Accept", "application/json")
+                .build()
 
-        val request = Request.Builder()
-            .url(urlBuilder.build())
-            .addHeader("X-Access-Token", apiKey)
-            .addHeader("Accept", "application/json")
-            .build()
+            return@withContext executeRequest(request)
+        }
 
-        try {
+        getDeparturesByNames(nearbyStopNames, limit)
+    }
+
+    private fun executeRequest(request: Request): Result<GolemioDepartureBoardResponse> {
+        return try {
             val response = okHttpClient.newCall(request).execute()
             response.use { res ->
                 val code = res.code

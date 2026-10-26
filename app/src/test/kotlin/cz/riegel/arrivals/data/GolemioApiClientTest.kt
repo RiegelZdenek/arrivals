@@ -75,7 +75,7 @@ class GolemioApiClientTest {
         mockWebServer = MockWebServer()
         mockWebServer.start()
         apiClient = GolemioApiClient(
-            baseUrl = mockWebServer.url("/").toString(),
+            baseUrl = mockWebServer.url("/v2/pid/departureboards").toString(),
             apiKeyProvider = { "test-api-token-12345" },
             okHttpClient = OkHttpClient.Builder().build()
         )
@@ -113,10 +113,26 @@ class GolemioApiClientTest {
         val recordedRequest = mockWebServer.takeRequest()
         assertEquals("test-api-token-12345", recordedRequest.getHeader("X-Access-Token"))
         val requestUrl = recordedRequest.requestUrl!!
-        assertEquals("50.0755", requestUrl.queryParameter("lat"))
-        assertEquals("14.4302", requestUrl.queryParameter("lng"))
-        assertEquals("300", requestUrl.queryParameter("range"))
         assertEquals("10", requestUrl.queryParameter("limit"))
+        assertEquals("I. P. Pavlova", requestUrl.queryParameter("names"))
+    }
+
+    @Test
+    fun getDeparturesByNames_sendsNamesParam() = runBlocking {
+        mockWebServer.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(sampleJson)
+        )
+
+        val result = apiClient.getDeparturesByNames(listOf("Hlavní nádraží"), limit = 1)
+        assertTrue(result.isSuccess)
+
+        val recordedRequest = mockWebServer.takeRequest()
+        val requestUrl = recordedRequest.requestUrl!!
+        assertEquals("1", requestUrl.queryParameter("limit"))
+        assertEquals("Hlavní nádraží", requestUrl.queryParameter("names"))
     }
 
     @Test

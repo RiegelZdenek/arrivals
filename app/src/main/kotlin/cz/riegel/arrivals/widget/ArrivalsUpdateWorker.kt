@@ -46,7 +46,10 @@ class ArrivalsUpdateWorker(
             return Result.success()
         }
 
-        val apiClient = GolemioApiClient(apiKeyProvider = { apiKey })
+        val apiClient = GolemioApiClient(
+            apiKeyProvider = { apiKey },
+            stopRegistry = cz.riegel.arrivals.data.StopRegistry(appContext)
+        )
         val now = Instant.now()
 
         // 1. Resolve coordinates (GPS or 30-min underground fallback per ADR-0003)
