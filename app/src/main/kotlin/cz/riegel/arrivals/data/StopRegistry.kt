@@ -25,7 +25,7 @@ class StopRegistry(private val context: Context? = null) {
         val assetManager = context?.assets ?: return defaultPragueHubs
         return try {
             assetManager.open("stops_compact.json").use { stream ->
-                val content = stream.bufferedReader().readText().removePrefix("\uFEFF")
+                val content = stream.bufferedReader(Charsets.UTF_8).readText().removePrefix("\uFEFF")
                 json.decodeFromString<List<CompactStop>>(content)
             }
         } catch (e: Exception) {

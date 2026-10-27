@@ -60,6 +60,21 @@ class DeparturesCacheRepository(context: Context) {
         )
     }
 
+    fun saveActiveSelection(stopIndex: Int, platformCode: String) {
+        prefs.edit()
+            .putInt(KEY_ACTIVE_STOP_INDEX, stopIndex)
+            .putString(KEY_ACTIVE_PLATFORM_CODE, platformCode)
+            .apply()
+    }
+
+    fun getActiveStopIndex(): Int {
+        return prefs.getInt(KEY_ACTIVE_STOP_INDEX, 0)
+    }
+
+    fun getActivePlatformCode(): String? {
+        return prefs.getString(KEY_ACTIVE_PLATFORM_CODE, null)
+    }
+
     companion object {
         private const val PREFS_CACHE_NAME = "arrivals_cache_prefs"
         private const val KEY_CACHED_PAYLOAD = "cached_payload"
@@ -67,5 +82,7 @@ class DeparturesCacheRepository(context: Context) {
         private const val KEY_LAT = "last_lat"
         private const val KEY_LON = "last_lon"
         private const val KEY_COORDS_TIME = "coords_time"
+        private const val KEY_ACTIVE_STOP_INDEX = "active_stop_index"
+        private const val KEY_ACTIVE_PLATFORM_CODE = "active_platform_code"
     }
 }

@@ -4,10 +4,13 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.datastore.preferences.core.Preferences
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.LocalContext
@@ -25,6 +28,7 @@ import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
+import androidx.glance.currentState
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Box
 import androidx.glance.layout.Column
@@ -57,8 +61,11 @@ class ArrivalsWidget : GlanceAppWidget() {
     )
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val state = WidgetStateManager.getState(context)
+        WidgetStateManager.getState(context)
         provideContent {
+            // Subscribe to both Glance Preferences state and StateFlow so all session updates recompose immediately
+            currentState<Preferences>()
+            val state by WidgetStateManager.stateFlow.collectAsState()
             ArrivalsWidgetContent(state = state)
         }
     }
@@ -359,29 +366,34 @@ fun PlatformPillsRow(platforms: List<Platform>, selectedCode: String) {
         modifier = GlanceModifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        platforms.forEach { platform ->
+        platforms.forEachIndexed { index, platform ->
             val isSelected = platform.code == selectedCode
             val pillBg = if (isSelected) Color.White else Color(0xFF2C2A34)
             val textColor = if (isSelected) Color.Black else Color(0xFFCCCCCC)
+            val selectAction = actionRunCallback<SelectPlatformActionCallback>(
+                actionParametersOf(PlatformCodeKey to platform.code)
+            )
 
             Box(
                 modifier = GlanceModifier
-                    .padding(end = 6.dp)
                     .background(pillBg)
                     .cornerRadius(10.dp)
-                    .padding(horizontal = 8.dp, vertical = 2.dp)
-                    .clickable(actionRunCallback<SelectPlatformActionCallback>(
-                        actionParametersOf(PlatformCodeKey to platform.code)
-                    ))
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .clickable(selectAction),
+                contentAlignment = Alignment.Center
             ) {
                 Text(
                     text = platform.code,
+                    modifier = GlanceModifier.clickable(selectAction),
                     style = TextStyle(
                         color = androidx.glance.unit.ColorProvider(textColor),
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                         fontSize = 11.sp
                     )
                 )
+            }
+            if (index < platforms.lastIndex) {
+                Spacer(modifier = GlanceModifier.width(6.dp))
             }
         }
     }

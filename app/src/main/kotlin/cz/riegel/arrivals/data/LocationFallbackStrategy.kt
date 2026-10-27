@@ -34,6 +34,21 @@ class LocationFallbackStrategy(
 
         return null
     }
+
+    fun fromProviderReading(
+        lat: Double,
+        lon: Double,
+        accuracyMeters: Float? = null,
+        observedAt: Instant = Instant.now()
+    ): UserCoordinates {
+        return UserCoordinates(
+            lat = lat,
+            lon = lon,
+            timestamp = observedAt,
+            isStaleUndergroundFallback = false,
+            accuracyMeters = accuracyMeters
+        )
+    }
 }
 
 object CacheResilience {

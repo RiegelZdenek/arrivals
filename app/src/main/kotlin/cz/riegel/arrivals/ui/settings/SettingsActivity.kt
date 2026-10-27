@@ -1,7 +1,11 @@
 package cz.riegel.arrivals.ui.settings
 
 import android.Manifest
+import android.annotation.SuppressLint
+import android.content.Context
 import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationManager
 import android.os.Bundle
 import android.view.View
 import android.widget.ArrayAdapter
@@ -19,12 +23,15 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import cz.riegel.arrivals.R
+import cz.riegel.arrivals.data.DeparturesCacheRepository
 import cz.riegel.arrivals.data.SettingsRepository
 import cz.riegel.arrivals.data.StopRegistry
+import cz.riegel.arrivals.data.UserCoordinates
 import cz.riegel.arrivals.widget.ArrivalsUpdateWorker
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeoutOrNull
+import java.time.Instant
 
 class SettingsActivity : AppCompatActivity() {
 
@@ -158,15 +165,36 @@ class SettingsActivity : AppCompatActivity() {
                 val fusedClient = LocationServices.getFusedLocationProviderClient(this@SettingsActivity)
                 val cts = CancellationTokenSource()
 
-                // Actively query high accuracy GPS
-                val location = withTimeoutOrNull(8_000) {
-                    fusedClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token).await()
-                } ?: fusedClient.lastLocation.await()
+                // Actively query high accuracy GPS, then fallback to lastLocation or LocationManager
+                val location = try {
+                    withTimeoutOrNull(4_000) {
+                        fusedClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token).await()
+                    }
+                } finally {
+                    cts.cancel()
+                } ?: try {
+                    fusedClient.lastLocation.await()
+                } catch (_: Exception) {
+                    null
+                } ?: getLocationFromLocationManager()
 
                 if (location != null) {
                     val lat = location.latitude
                     val lon = location.longitude
                     val accuracy = if (location.hasAccuracy()) "±${location.accuracy.toInt()} m" else "neznámá"
+
+                    // Persist this fresh foreground fix immediately so the background widget worker has it
+                    DeparturesCacheRepository(this@SettingsActivity).saveLastCoordinates(
+                        UserCoordinates(
+                            lat = lat,
+                            lon = lon,
+                            timestamp = Instant.now(),
+                            accuracyMeters = if (location.hasAccuracy()) location.accuracy else null
+                        )
+                    )
+                    if (settingsRepository.isConfigured()) {
+                        ArrivalsUpdateWorker.enqueueOneTimeWork(this@SettingsActivity)
+                    }
 
                     if (!StopRegistry.isWithinPragueCoverage(lat, lon)) {
                         textLocationStatus.text = "⚠ Poloha: %.4f, %.4f (Přesnost: %s)\nPoloha je mimo oblast Prahy PID. Pokud používáte emulátor, nastavte GPS na Prahu nebo zvolte simulovanou zastávku níže."
@@ -190,6 +218,27 @@ class SettingsActivity : AppCompatActivity() {
                 progressLocation.visibility = View.GONE
                 btnRefreshLocation.isEnabled = true
             }
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun getLocationFromLocationManager(): Location? {
+        return try {
+            val lm = getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
+            val providers = listOf(
+                LocationManager.GPS_PROVIDER,
+                LocationManager.NETWORK_PROVIDER,
+                LocationManager.PASSIVE_PROVIDER
+            )
+            providers.mapNotNull { provider ->
+                try {
+                    if (lm.isProviderEnabled(provider)) lm.getLastKnownLocation(provider) else null
+                } catch (_: Exception) {
+                    null
+                }
+            }.maxByOrNull { it.time }
+        } catch (_: Exception) {
+            null
         }
     }
 

@@ -2,6 +2,8 @@ package cz.riegel.arrivals.widget
 
 import android.annotation.SuppressLint
 import android.content.Context
+import android.location.Location
+import android.location.LocationManager
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -73,7 +75,7 @@ class ArrivalsUpdateWorker(
         )
 
         if (resolvedCoords == null) {
-            handleNoValidLocation(now)
+            handleNoValidLocation(now, cachedCoords)
             return Result.success()
         }
 
@@ -96,7 +98,7 @@ class ArrivalsUpdateWorker(
                 lat = resolvedCoords.lat,
                 lon = resolvedCoords.lon,
                 radiusMeters = radius,
-                limit = 20
+                limit = 60
             )
 
             if (responseResult.isSuccess) {
@@ -117,7 +119,8 @@ class ArrivalsUpdateWorker(
             cacheRepository.saveLastResponse(apiSuccessResponse, now)
             val stops = normalizer.normalize(apiSuccessResponse, referenceTime = now)
 
-            val warningBanner = if (resolvedCoords.isStaleUndergroundFallback) {
+            val ageMins = java.time.Duration.between(resolvedCoords.timestamp, now).toMinutes()
+            val warningBanner = if (resolvedCoords.isStaleUndergroundFallback && ageMins >= 5) {
                 "Underground GPS fallback • Last known location"
             } else null
 
@@ -146,7 +149,7 @@ class ArrivalsUpdateWorker(
         return Result.success()
     }
 
-    private suspend fun handleNoValidLocation(now: Instant) {
+    private suspend fun handleNoValidLocation(now: Instant, cachedCoords: UserCoordinates?) {
         val hasFine = appContext.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
         val hasCoarse = appContext.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
         val errorMsg = if (!hasFine && !hasCoarse) {
@@ -156,7 +159,7 @@ class ArrivalsUpdateWorker(
         }
         restoreCachedDepartures(
             now = now,
-            userCoords = null,
+            userCoords = cachedCoords?.let { Coordinates(it.lat, it.lon) },
             fallbackErrorMessage = errorMsg
         )
     }
@@ -196,13 +199,14 @@ class ArrivalsUpdateWorker(
 
     @SuppressLint("MissingPermission")
     private suspend fun getFreshLocation(): UserCoordinates? {
+        val now = Instant.now()
         val simulatedHub = settingsRepository.getSelectedSimulationHub()
         if (simulatedHub != null) {
-            return UserCoordinates(
+            return locationStrategy.fromProviderReading(
                 lat = simulatedHub.lat,
                 lon = simulatedHub.lon,
-                timestamp = Instant.now(),
-                accuracyMeters = 1.0f
+                accuracyMeters = 1.0f,
+                observedAt = now
             )
         }
 
@@ -215,34 +219,74 @@ class ArrivalsUpdateWorker(
         return try {
             val fusedClient = LocationServices.getFusedLocationProviderClient(appContext)
 
-            // 1. Actively query high-accuracy GPS fix with 8s timeout
+            // 1. Actively query high-accuracy GPS fix with 4s timeout
             val cts = CancellationTokenSource()
-            val freshLocation = withTimeoutOrNull(8_000) {
-                fusedClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token).await()
+            val freshLocation = try {
+                withTimeoutOrNull(4_000) {
+                    fusedClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token).await()
+                }
+            } finally {
+                cts.cancel()
             }
 
             if (freshLocation != null) {
-                return UserCoordinates(
+                return locationStrategy.fromProviderReading(
                     lat = freshLocation.latitude,
                     lon = freshLocation.longitude,
-                    timestamp = Instant.ofEpochMilli(freshLocation.time),
-                    accuracyMeters = freshLocation.accuracy
+                    accuracyMeters = freshLocation.accuracy,
+                    observedAt = now
                 )
             }
 
-            // 2. Fallback to lastLocation if fresh query timed out
-            val lastLocation = fusedClient.lastLocation.await()
+            // 2. Fallback to Fused lastLocation if fresh query timed out
+            val lastLocation = try {
+                fusedClient.lastLocation.await()
+            } catch (_: Exception) {
+                null
+            }
             if (lastLocation != null) {
-                UserCoordinates(
+                return locationStrategy.fromProviderReading(
                     lat = lastLocation.latitude,
                     lon = lastLocation.longitude,
-                    timestamp = Instant.ofEpochMilli(lastLocation.time),
-                    accuracyMeters = lastLocation.accuracy
+                    accuracyMeters = lastLocation.accuracy,
+                    observedAt = now
+                )
+            }
+
+            // 3. Fallback to Android LocationManager providers (reliable on emulators)
+            val lmLocation = getLocationFromLocationManager(appContext)
+            if (lmLocation != null) {
+                locationStrategy.fromProviderReading(
+                    lat = lmLocation.latitude,
+                    lon = lmLocation.longitude,
+                    accuracyMeters = if (lmLocation.hasAccuracy()) lmLocation.accuracy else null,
+                    observedAt = now
                 )
             } else {
                 null
             }
         } catch (e: Exception) {
+            null
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun getLocationFromLocationManager(context: Context): Location? {
+        return try {
+            val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
+            val providers = listOf(
+                LocationManager.GPS_PROVIDER,
+                LocationManager.NETWORK_PROVIDER,
+                LocationManager.PASSIVE_PROVIDER
+            )
+            providers.mapNotNull { provider ->
+                try {
+                    if (lm.isProviderEnabled(provider)) lm.getLastKnownLocation(provider) else null
+                } catch (_: Exception) {
+                    null
+                }
+            }.maxByOrNull { it.time }
+        } catch (_: Exception) {
             null
         }
     }
