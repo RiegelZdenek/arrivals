@@ -52,7 +52,8 @@ data class Platform(
     val code: String, // e.g., "A", "B", or headsign fallback "→ Centrum"
     val lat: Double = 0.0,
     val lon: Double = 0.0,
-    val departures: List<Departure> = emptyList()
+    val departures: List<Departure> = emptyList(),
+    val distanceMeters: Int? = null
 )
 
 data class Stop(

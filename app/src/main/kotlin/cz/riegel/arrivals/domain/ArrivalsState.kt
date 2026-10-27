@@ -37,6 +37,9 @@ sealed interface ArrivalsViewState {
             get() = activeStop.platforms.find { it.code == activePlatformCode }
                 ?: activeStop.platforms.firstOrNull()
 
+        val activeDistanceMeters: Int?
+            get() = activePlatform?.distanceMeters ?: activeStop.distanceMeters
+
         val activeDepartures: List<Departure>
             get() = activePlatform?.departures.orEmpty()
 

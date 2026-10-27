@@ -286,7 +286,10 @@ fun ArrivalsWidgetContent(state: ArrivalsViewState) {
 @Composable
 fun HeaderRow(state: ArrivalsViewState.Content) {
     val activeStop = state.activeStop
-    val mapIntent = Intent(Intent.ACTION_VIEW, Uri.parse("geo:${activeStop.lat},${activeStop.lon}?q=${Uri.encode(activeStop.name)}"))
+    val activePlatform = state.activePlatform
+    val targetLat = activePlatform?.lat?.takeIf { it != 0.0 } ?: activeStop.lat
+    val targetLon = activePlatform?.lon?.takeIf { it != 0.0 } ?: activeStop.lon
+    val mapIntent = Intent(Intent.ACTION_VIEW, Uri.parse("geo:$targetLat,$targetLon?q=${Uri.encode(activeStop.name)}"))
 
     Row(
         modifier = GlanceModifier.fillMaxWidth(),
@@ -303,8 +306,9 @@ fun HeaderRow(state: ArrivalsViewState.Content) {
             )
         )
 
-        // Walking distance badge
-        if (activeStop.distanceMeters != null) {
+        // Walking distance badge to the selected platform (falling back to stop distance)
+        val displayDistance = state.activeDistanceMeters
+        if (displayDistance != null) {
             Spacer(modifier = GlanceModifier.width(6.dp))
             Box(
                 modifier = GlanceModifier
@@ -313,7 +317,7 @@ fun HeaderRow(state: ArrivalsViewState.Content) {
                     .padding(horizontal = 6.dp, vertical = 2.dp)
             ) {
                 Text(
-                    text = "${activeStop.distanceMeters}m",
+                    text = "${displayDistance}m",
                     style = TextStyle(color = androidx.glance.unit.ColorProvider(Color(0xFFB0B0C0)), fontSize = 11.sp)
                 )
             }

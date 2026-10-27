@@ -19,11 +19,14 @@ class ArrivalsEngine {
         return stops.map { stop ->
             val dist = calculateDistanceMeters(userCoords, Coordinates(stop.lat, stop.lon))
             val rankedPlatforms = stop.platforms.map { platform ->
-                if (platform.lat != 0.0 && platform.lon != 0.0) {
-                    platform
+                val pLat = if (platform.lat != 0.0) platform.lat else stop.lat
+                val pLon = if (platform.lon != 0.0) platform.lon else stop.lon
+                val pDist = if (pLat != 0.0 && pLon != 0.0) {
+                    calculateDistanceMeters(userCoords, Coordinates(pLat, pLon))
                 } else {
-                    platform.copy(lat = stop.lat, lon = stop.lon)
+                    dist
                 }
+                platform.copy(lat = pLat, lon = pLon, distanceMeters = pDist)
             }
             stop.copy(distanceMeters = dist, platforms = rankedPlatforms)
         }.sortedBy { it.distanceMeters ?: Int.MAX_VALUE }

@@ -143,16 +143,23 @@ class BugReproductionTest {
         // Simulate process recreation where in-memory state was reset to Loading
         WidgetStateManager.setState(context, ArrivalsViewState.Loading())
 
-        // User clicks Platform "B", then Platform "C"
+        // User clicks Platform "A", then Platform "B", then Platform "C"
+        WidgetStateManager.onSelectPlatform(context, "A")
+        val stateAfterA = WidgetStateManager.getState(context) as ArrivalsViewState.Content
+        assertEquals("A", stateAfterA.activePlatformCode)
+        assertEquals(0, stateAfterA.activeDistanceMeters)
+
         WidgetStateManager.onSelectPlatform(context, "B")
         val stateAfterB = WidgetStateManager.getState(context)
         assertTrue("State should be Content after selecting platform B, but was $stateAfterB", stateAfterB is ArrivalsViewState.Content)
         assertEquals("B", (stateAfterB as ArrivalsViewState.Content).activePlatformCode)
         assertEquals("5", stateAfterB.activeDepartures.first().line.name)
+        assertTrue("Distance to platform B should be > 0m", (stateAfterB.activeDistanceMeters ?: 0) > 0)
 
         WidgetStateManager.onSelectPlatform(context, "C")
         val stateAfterC = WidgetStateManager.getState(context) as ArrivalsViewState.Content
         assertEquals("C", stateAfterC.activePlatformCode)
         assertEquals("26", stateAfterC.activeDepartures.first().line.name)
+        assertEquals(stateAfterC.activePlatform?.distanceMeters, stateAfterC.activeDistanceMeters)
     }
 }
