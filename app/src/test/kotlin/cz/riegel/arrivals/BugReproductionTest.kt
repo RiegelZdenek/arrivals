@@ -107,7 +107,7 @@ class BugReproductionTest {
     @Test
     fun bug4_widgetPlatformSelection_survivesProcessRecreationAndUpdatesState() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val now = Instant.parse("2026-10-27T18:30:00Z")
+        val now = Instant.now()
         val cacheRepo = DeparturesCacheRepository(context)
 
         val dto = GolemioDepartureBoardResponse(
@@ -118,19 +118,19 @@ class BugReproductionTest {
             ),
             departures = listOf(
                 GolemioDepartureDto(
-                    departureTimestamp = GolemioTimestampDto(scheduled = "2026-10-27T18:35:00Z"),
+                    departureTimestamp = GolemioTimestampDto(scheduled = now.plusSeconds(300).toString()),
                     stop = GolemioDepartureStopDto(id = "S1_A", platformCode = "A"),
                     route = GolemioRouteDto(shortName = "9", type = 0),
                     trip = GolemioTripDto(headsign = "Spojovací")
                 ),
                 GolemioDepartureDto(
-                    departureTimestamp = GolemioTimestampDto(scheduled = "2026-10-27T18:36:00Z"),
+                    departureTimestamp = GolemioTimestampDto(scheduled = now.plusSeconds(360).toString()),
                     stop = GolemioDepartureStopDto(id = "S1_B", platformCode = "B"),
                     route = GolemioRouteDto(shortName = "5", type = 0),
                     trip = GolemioTripDto(headsign = "Slivenec")
                 ),
                 GolemioDepartureDto(
-                    departureTimestamp = GolemioTimestampDto(scheduled = "2026-10-27T18:37:00Z"),
+                    departureTimestamp = GolemioTimestampDto(scheduled = now.plusSeconds(420).toString()),
                     stop = GolemioDepartureStopDto(id = "S1_C", platformCode = "C"),
                     route = GolemioRouteDto(shortName = "26", type = 0),
                     trip = GolemioTripDto(headsign = "Dědina")
@@ -145,21 +145,29 @@ class BugReproductionTest {
 
         // User clicks Platform "A", then Platform "B", then Platform "C"
         WidgetStateManager.onSelectPlatform(context, "A")
-        val stateAfterA = WidgetStateManager.getState(context) as ArrivalsViewState.Content
+        val stateAfterA = WidgetStateManager.getState(context, now) as ArrivalsViewState.Content
         assertEquals("A", stateAfterA.activePlatformCode)
         assertEquals(0, stateAfterA.activeDistanceMeters)
+        assertEquals("5 min", stateAfterA.activeDepartures.first().countdown.displayText)
+
+        // Advance clock by 1 minute without calling API -> countdown ticks from 5 min to 4 min
+        WidgetStateManager.tickCountdowns(context, now.plusSeconds(60))
+        val stateAfterTick = WidgetStateManager.getState(context, now.plusSeconds(60)) as ArrivalsViewState.Content
+        assertEquals("4 min", stateAfterTick.activeDepartures.first().countdown.displayText)
 
         WidgetStateManager.onSelectPlatform(context, "B")
-        val stateAfterB = WidgetStateManager.getState(context)
+        val stateAfterB = WidgetStateManager.getState(context, now.plusSeconds(60))
         assertTrue("State should be Content after selecting platform B, but was $stateAfterB", stateAfterB is ArrivalsViewState.Content)
         assertEquals("B", (stateAfterB as ArrivalsViewState.Content).activePlatformCode)
         assertEquals("5", stateAfterB.activeDepartures.first().line.name)
+        assertEquals("5 min", stateAfterB.activeDepartures.first().countdown.displayText)
         assertTrue("Distance to platform B should be > 0m", (stateAfterB.activeDistanceMeters ?: 0) > 0)
 
         WidgetStateManager.onSelectPlatform(context, "C")
-        val stateAfterC = WidgetStateManager.getState(context) as ArrivalsViewState.Content
+        val stateAfterC = WidgetStateManager.getState(context, now.plusSeconds(60)) as ArrivalsViewState.Content
         assertEquals("C", stateAfterC.activePlatformCode)
         assertEquals("26", stateAfterC.activeDepartures.first().line.name)
+        assertEquals("6 min", stateAfterC.activeDepartures.first().countdown.displayText)
         assertEquals(stateAfterC.activePlatform?.distanceMeters, stateAfterC.activeDistanceMeters)
     }
 }

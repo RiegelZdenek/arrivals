@@ -4,8 +4,13 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -66,6 +71,14 @@ class ArrivalsWidget : GlanceAppWidget() {
             // Subscribe to both Glance Preferences state and StateFlow so all session updates recompose immediately
             currentState<Preferences>()
             val state by WidgetStateManager.stateFlow.collectAsState()
+            LaunchedEffect(Unit) {
+                while (true) {
+                    val nowMillis = System.currentTimeMillis()
+                    val delayToNextMinute = 60_000L - (nowMillis % 60_000L) + 250L
+                    delay(delayToNextMinute.coerceIn(1_000L, 60_500L))
+                    WidgetStateManager.tickCountdowns(context)
+                }
+            }
             ArrivalsWidgetContent(state = state)
         }
     }
@@ -74,10 +87,32 @@ class ArrivalsWidget : GlanceAppWidget() {
 class ArrivalsWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = ArrivalsWidget()
 
+    override fun onReceive(context: Context, intent: Intent) {
+        WidgetCountdownTicker.ensureRegistered(context)
+        if (intent.action == WidgetCountdownTicker.ACTION_TICK_COUNTDOWN) {
+            val pendingResult = goAsync()
+            CoroutineScope(Dispatchers.Default).launch {
+                try {
+                    WidgetStateManager.tickCountdowns(context.applicationContext)
+                } finally {
+                    pendingResult.finish()
+                }
+            }
+            return
+        }
+        super.onReceive(context, intent)
+    }
+
     override fun onEnabled(context: Context) {
         super.onEnabled(context)
+        WidgetCountdownTicker.ensureRegistered(context)
         ArrivalsUpdateWorker.schedulePeriodicWork(context)
         ArrivalsUpdateWorker.enqueueOneTimeWork(context)
+    }
+
+    override fun onDisabled(context: Context) {
+        super.onDisabled(context)
+        WidgetCountdownTicker.cancelMinuteAlarm(context)
     }
 }
 

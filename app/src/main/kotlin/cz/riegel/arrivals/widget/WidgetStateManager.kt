@@ -22,24 +22,40 @@ object WidgetStateManager {
     private val GLANCE_STATE_VERSION_KEY = longPreferencesKey("glance_state_version")
     private var versionCounter = 0L
 
-    fun getState(context: Context): ArrivalsViewState {
+    fun getState(context: Context, referenceTime: Instant = Instant.now()): ArrivalsViewState {
+        WidgetCountdownTicker.ensureRegistered(context)
         val current = _stateFlow.value
         if (current is ArrivalsViewState.Loading) {
-            val rehydrated = rehydrateFromCache(context)
+            val rehydrated = rehydrateFromCache(context, referenceTime)
             if (rehydrated != null) {
                 _stateFlow.value = rehydrated
                 return rehydrated
             }
+        } else if (current is ArrivalsViewState.Content) {
+            val updatedStops = normalizer.refreshCountdowns(current.stops, referenceTime)
+            val refreshed = current.copy(stops = updatedStops)
+            _stateFlow.value = refreshed
+            return refreshed
         }
         return current
     }
 
-    private fun rehydrateFromCache(context: Context): ArrivalsViewState.Content? {
+    suspend fun tickCountdowns(context: Context, referenceTime: Instant = Instant.now()) {
+        val state = getState(context, referenceTime)
+        if (state is ArrivalsViewState.Content) {
+            updateAllWidgets(context)
+        }
+    }
+
+    private fun rehydrateFromCache(
+        context: Context,
+        referenceTime: Instant = Instant.now()
+    ): ArrivalsViewState.Content? {
         return try {
             val cacheRepo = DeparturesCacheRepository(context)
             val cached = cacheRepo.getLastResponse() ?: return null
             val (dto, _) = cached
-            val stops = normalizer.normalize(dto, referenceTime = Instant.now())
+            val stops = normalizer.normalize(dto, referenceTime = referenceTime)
             if (stops.isEmpty()) return null
 
             val cachedCoords = cacheRepo.getLastCoordinates()?.let {

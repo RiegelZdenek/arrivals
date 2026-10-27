@@ -70,6 +70,8 @@ class DepartureNormalizer(
 
                 val normalizedDepartures = platformDepartures.mapNotNull { depDto ->
                     normalizeDeparture(depDto, referenceTime)
+                }.filter { dep ->
+                    Duration.between(referenceTime, dep.predictedTime).seconds >= -30
                 }.sortedBy { it.predictedTime }
 
                 Platform(
@@ -112,28 +114,7 @@ class DepartureNormalizer(
         val scheduledInstant = parseTimestamp(depDto.departureTimestamp.scheduled) ?: return null
         val predictedInstant = depDto.departureTimestamp.predicted?.let { parseTimestamp(it) } ?: scheduledInstant
 
-        val diffMinutes = Duration.between(referenceTime, predictedInstant).toMinutes()
-
-        val countdown = when {
-            diffMinutes < 1 -> CountdownDisplay(
-                minutesRemaining = diffMinutes,
-                displayText = "<1 min",
-                isClockTime = false
-            )
-            diffMinutes <= 30 -> CountdownDisplay(
-                minutesRemaining = diffMinutes,
-                displayText = "$diffMinutes min",
-                isClockTime = false
-            )
-            else -> {
-                val zonedDateTime = predictedInstant.atZone(zoneId)
-                CountdownDisplay(
-                    minutesRemaining = diffMinutes,
-                    displayText = clockTimeFormatter.format(zonedDateTime),
-                    isClockTime = true
-                )
-            }
-        }
+        val countdown = computeCountdown(predictedInstant, referenceTime)
 
         val delayMinutes = depDto.delay.minutes ?: calculateDelayMinutes(scheduledInstant, predictedInstant)
         val delay = Delay(
@@ -156,6 +137,51 @@ class DepartureNormalizer(
             delay = delay,
             isWheelchairAccessible = depDto.trip.isWheelchairAccessible ?: false
         )
+    }
+
+    fun computeCountdown(
+        predictedInstant: Instant,
+        referenceTime: Instant = Instant.now()
+    ): CountdownDisplay {
+        val diffSeconds = Duration.between(referenceTime, predictedInstant).seconds
+        if (diffSeconds < 45) {
+            return CountdownDisplay(
+                minutesRemaining = 0,
+                displayText = "<1 min",
+                isClockTime = false
+            )
+        }
+
+        val diffMinutes = (diffSeconds + 30) / 60
+        return if (diffMinutes <= 30) {
+            CountdownDisplay(
+                minutesRemaining = diffMinutes,
+                displayText = "$diffMinutes min",
+                isClockTime = false
+            )
+        } else {
+            val zonedDateTime = predictedInstant.atZone(zoneId)
+            CountdownDisplay(
+                minutesRemaining = diffMinutes,
+                displayText = clockTimeFormatter.format(zonedDateTime),
+                isClockTime = true
+            )
+        }
+    }
+
+    fun refreshCountdowns(
+        stops: List<Stop>,
+        referenceTime: Instant = Instant.now()
+    ): List<Stop> {
+        return stops.map { stop ->
+            val updatedPlatforms = stop.platforms.map { platform ->
+                val updatedDepartures = platform.departures
+                    .filter { dep -> Duration.between(referenceTime, dep.predictedTime).seconds >= -30 }
+                    .map { dep -> dep.copy(countdown = computeCountdown(dep.predictedTime, referenceTime)) }
+                platform.copy(departures = updatedDepartures)
+            }
+            stop.copy(platforms = updatedPlatforms)
+        }
     }
 
     fun resolveTransportMode(type: Int): TransportMode {

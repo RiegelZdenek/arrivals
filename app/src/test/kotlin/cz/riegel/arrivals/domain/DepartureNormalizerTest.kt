@@ -181,4 +181,54 @@ class DepartureNormalizerTest {
         assertEquals(1, stops[0].platforms.size)
         assertEquals(0, stops[0].platforms[0].departures.size)
     }
+
+    @Test
+    fun refreshCountdowns_decrementsMinutesAndRemovesDepartedVehiclesWithoutRefetching() {
+        val dto = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "S1", stopName = "Lipanská", platformCode = "A")
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = "2026-10-23T16:31:00+02:00",
+                        predicted = "2026-10-23T16:31:00+02:00"
+                    ),
+                    stop = GolemioDepartureStopDto(id = "S1", name = "Lipanská", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "5", type = 0),
+                    trip = GolemioTripDto(headsign = "Slivenec")
+                ),
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = "2026-10-23T16:35:00+02:00",
+                        predicted = "2026-10-23T16:35:00+02:00"
+                    ),
+                    stop = GolemioDepartureStopDto(id = "S1", name = "Lipanská", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "9", type = 0),
+                    trip = GolemioTripDto(headsign = "Spojovací")
+                )
+            )
+        )
+
+        // At 16:30:00 -> 1 min and 5 min
+        val initialStops = normalizer.normalize(dto, referenceTime = now)
+        val initialDeps = initialStops[0].platforms[0].departures
+        assertEquals(2, initialDeps.size)
+        assertEquals("1 min", initialDeps[0].countdown.displayText)
+        assertEquals("5 min", initialDeps[1].countdown.displayText)
+
+        // 1 minute later (16:31:00.250, simulating slight broadcast delivery jitter) -> <1 min and 4 min
+        val afterOneMin = normalizer.refreshCountdowns(initialStops, referenceTime = now.plusMillis(60_250))
+        val depsAtOneMin = afterOneMin[0].platforms[0].departures
+        assertEquals(2, depsAtOneMin.size)
+        assertEquals("<1 min", depsAtOneMin[0].countdown.displayText)
+        assertEquals("4 min", depsAtOneMin[1].countdown.displayText)
+
+        // 2 minutes later (16:32:00) -> 16:31 tram has departed and is removed, 16:35 tram is now at 3 min
+        val afterTwoMins = normalizer.refreshCountdowns(afterOneMin, referenceTime = now.plusSeconds(120))
+        val depsAtTwoMins = afterTwoMins[0].platforms[0].departures
+        assertEquals(1, depsAtTwoMins.size)
+        assertEquals("9", depsAtTwoMins[0].line.name)
+        assertEquals("3 min", depsAtTwoMins[0].countdown.displayText)
+    }
 }
