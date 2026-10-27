@@ -48,7 +48,22 @@ class StopRegistry(private val context: Context? = null) {
             .toList()
     }
 
+    fun findClosestStop(userLat: Double, userLon: Double): Pair<CompactStop, Int>? {
+        if (stops.isEmpty()) return null
+        val userCoords = Coordinates(userLat, userLon)
+        return stops.asSequence()
+            .map { stop ->
+                val dist = engine.calculateDistanceMeters(userCoords, Coordinates(stop.lat, stop.lon))
+                stop to dist
+            }
+            .minByOrNull { it.second }
+    }
+
     companion object {
+        fun isWithinPragueCoverage(lat: Double, lon: Double): Boolean {
+            return lat in 49.70..50.50 && lon in 14.00..15.00
+        }
+
         val defaultPragueHubs = listOf(
             CompactStop("I. P. Pavlova", 50.0754, 14.4301),
             CompactStop("Karlovo náměstí", 50.0760, 14.4200),

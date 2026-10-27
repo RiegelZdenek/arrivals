@@ -9,7 +9,8 @@ data class UserCoordinates(
     val lat: Double,
     val lon: Double,
     val timestamp: Instant,
-    val isStaleUndergroundFallback: Boolean = false
+    val isStaleUndergroundFallback: Boolean = false,
+    val accuracyMeters: Float? = null
 )
 
 class LocationFallbackStrategy(

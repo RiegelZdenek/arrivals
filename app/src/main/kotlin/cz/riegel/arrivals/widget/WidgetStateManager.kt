@@ -41,7 +41,12 @@ object WidgetStateManager {
     }
 
     suspend fun onRefresh(context: Context) {
-        // Trigger widget refresh workflow
+        // Immediately show loading/refreshing visual feedback
+        val next = engine.reduce(_stateFlow.value, ArrivalsAction.Refresh)
+        _stateFlow.value = next
+        updateAllWidgets(context)
+
+        // Trigger background worker update
         ArrivalsUpdateWorker.enqueueOneTimeWork(context)
     }
 

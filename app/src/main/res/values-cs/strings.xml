@@ -19,4 +19,10 @@
     <string name="retry">↻ Opakovat</string>
     <string name="min_unit">min</string>
     <string name="less_than_one_min">&lt;1 min</string>
+    <string name="location_section_title">GPS poloha a náhled zastávky</string>
+    <string name="refresh_location">Aktualizovat GPS polohu</string>
+    <string name="grant_permission">Povolit přístup k poloze</string>
+    <string name="simulation_section_title">Simulace pražské zastávky (pro emulátor / testování)</string>
+    <string name="testing_connection">Ověřování připojení k API Golemio…</string>
+    <string name="saving">Ukládání nastavení…</string>
 </resources>

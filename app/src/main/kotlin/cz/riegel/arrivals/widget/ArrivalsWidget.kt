@@ -15,6 +15,7 @@ import androidx.glance.LocalSize
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionParametersOf
 import androidx.glance.action.clickable
+import androidx.glance.appwidget.CircularProgressIndicator
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
 import androidx.glance.appwidget.SizeMode
@@ -33,6 +34,7 @@ import androidx.glance.layout.fillMaxSize
 import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
 import androidx.glance.layout.padding
+import androidx.glance.layout.size
 import androidx.glance.layout.width
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
@@ -122,10 +124,20 @@ fun ArrivalsWidgetContent(state: ArrivalsViewState) {
                     modifier = GlanceModifier.fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = context.getString(R.string.locating),
-                        style = TextStyle(color = androidx.glance.unit.ColorProvider(Color.LightGray), fontSize = 14.sp)
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = GlanceModifier.size(32.dp),
+                            color = androidx.glance.unit.ColorProvider(Color(0xFF81B0FF))
+                        )
+                        Spacer(modifier = GlanceModifier.height(10.dp))
+                        Text(
+                            text = state.message,
+                            style = TextStyle(color = androidx.glance.unit.ColorProvider(Color.LightGray), fontSize = 13.sp)
+                        )
+                    }
                 }
             }
             is ArrivalsViewState.SetupRequired -> {
@@ -188,6 +200,29 @@ fun ArrivalsWidgetContent(state: ArrivalsViewState) {
             }
             is ArrivalsViewState.Content -> {
                 Column(modifier = GlanceModifier.fillMaxSize()) {
+                    // Refreshing banner if update is currently in progress
+                    if (state.isRefreshing) {
+                        Row(
+                            modifier = GlanceModifier
+                                .fillMaxWidth()
+                                .background(Color(0x3381B0FF))
+                                .cornerRadius(6.dp)
+                                .padding(horizontal = 8.dp, vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = GlanceModifier.size(12.dp),
+                                color = androidx.glance.unit.ColorProvider(Color(0xFF81B0FF))
+                            )
+                            Spacer(modifier = GlanceModifier.width(6.dp))
+                            Text(
+                                text = "Aktualizace odjezdů…",
+                                style = TextStyle(color = androidx.glance.unit.ColorProvider(Color(0xFF81B0FF)), fontSize = 11.sp)
+                            )
+                        }
+                        Spacer(modifier = GlanceModifier.height(4.dp))
+                    }
+
                     // Cached warning banner if present (Spec 14)
                     if (!state.cachedWarning.isNullOrBlank()) {
                         Row(
@@ -298,14 +333,23 @@ fun HeaderRow(state: ArrivalsViewState.Content) {
             Spacer(modifier = GlanceModifier.width(4.dp))
         }
 
-        // Refresh icon (↻)
-        Text(
-            text = "↻",
-            modifier = GlanceModifier
-                .padding(start = 4.dp)
-                .clickable(actionRunCallback<RefreshActionCallback>()),
-            style = TextStyle(color = androidx.glance.unit.ColorProvider(Color(0xFF81B0FF)), fontWeight = FontWeight.Bold, fontSize = 16.sp)
-        )
+        // Refresh icon (↻) or spinner
+        if (state.isRefreshing) {
+            CircularProgressIndicator(
+                modifier = GlanceModifier
+                    .size(16.dp)
+                    .padding(start = 4.dp),
+                color = androidx.glance.unit.ColorProvider(Color(0xFF81B0FF))
+            )
+        } else {
+            Text(
+                text = "↻",
+                modifier = GlanceModifier
+                    .padding(start = 4.dp)
+                    .clickable(actionRunCallback<RefreshActionCallback>()),
+                style = TextStyle(color = androidx.glance.unit.ColorProvider(Color(0xFF81B0FF)), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            )
+        }
     }
 }
 

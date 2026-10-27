@@ -12,11 +12,14 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
+import com.google.android.gms.tasks.CancellationTokenSource
 import cz.riegel.arrivals.data.CacheResilience
 import cz.riegel.arrivals.data.DeparturesCacheRepository
 import cz.riegel.arrivals.data.GolemioApiClient
 import cz.riegel.arrivals.data.LocationFallbackStrategy
 import cz.riegel.arrivals.data.SettingsRepository
+import cz.riegel.arrivals.data.StopRegistry
 import cz.riegel.arrivals.data.UserCoordinates
 import cz.riegel.arrivals.domain.ArrivalsAction
 import cz.riegel.arrivals.domain.ArrivalsEngine
@@ -24,6 +27,7 @@ import cz.riegel.arrivals.domain.ArrivalsViewState
 import cz.riegel.arrivals.domain.DepartureNormalizer
 import cz.riegel.arrivals.domain.model.Coordinates
 import kotlinx.coroutines.tasks.await
+import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 
@@ -46,13 +50,20 @@ class ArrivalsUpdateWorker(
             return Result.success()
         }
 
+        // Show loading/refreshing visual indication immediately
+        val currentState = WidgetStateManager.getState(appContext)
+        if (currentState is ArrivalsViewState.Content && !currentState.isRefreshing) {
+            WidgetStateManager.setState(appContext, currentState.copy(isRefreshing = true))
+            WidgetStateManager.updateAllWidgets(appContext)
+        }
+
         val apiClient = GolemioApiClient(
             apiKeyProvider = { apiKey },
-            stopRegistry = cz.riegel.arrivals.data.StopRegistry(appContext)
+            stopRegistry = StopRegistry(appContext)
         )
         val now = Instant.now()
 
-        // 1. Resolve coordinates (GPS or 30-min underground fallback per ADR-0003)
+        // 1. Resolve coordinates (High-Accuracy GPS or 30-min underground fallback per ADR-0003)
         val freshLocation = getFreshLocation()
         val cachedCoords = cacheRepository.getLastCoordinates()
         val resolvedCoords = locationStrategy.resolveCoordinates(
@@ -106,16 +117,26 @@ class ArrivalsUpdateWorker(
             cacheRepository.saveLastResponse(apiSuccessResponse, now)
             val stops = normalizer.normalize(apiSuccessResponse, referenceTime = now)
 
+            val warningBanner = if (resolvedCoords.isStaleUndergroundFallback) {
+                "Underground GPS fallback • Last known location"
+            } else null
+
             val updatedState = engine.reduce(
                 WidgetStateManager.getState(appContext),
                 ArrivalsAction.UpdateData(
                     stops = stops,
                     userCoordinates = userCoords,
-                    cachedWarning = null
+                    cachedWarning = warningBanner
                 )
             )
 
-            WidgetStateManager.setState(appContext, updatedState)
+            val finalState = if (updatedState is ArrivalsViewState.Content) {
+                updatedState.copy(isRefreshing = false)
+            } else {
+                updatedState
+            }
+
+            WidgetStateManager.setState(appContext, finalState)
             WidgetStateManager.updateAllWidgets(appContext)
             return Result.success()
         }
@@ -126,11 +147,17 @@ class ArrivalsUpdateWorker(
     }
 
     private suspend fun handleNoValidLocation(now: Instant) {
-        // GPS failed and no cached location under 30 minutes old
+        val hasFine = appContext.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val hasCoarse = appContext.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val errorMsg = if (!hasFine && !hasCoarse) {
+            "Location permission required. Tap to open Settings."
+        } else {
+            "No GPS fix available. Ensure location is enabled or select a test stop in Settings."
+        }
         restoreCachedDepartures(
             now = now,
             userCoords = null,
-            fallbackErrorMessage = "No GPS fix available. Ensure location permissions are enabled."
+            fallbackErrorMessage = errorMsg
         )
     }
 
@@ -153,7 +180,12 @@ class ArrivalsUpdateWorker(
                     cachedWarning = warningBanner
                 )
             )
-            WidgetStateManager.setState(appContext, updatedState)
+            val finalState = if (updatedState is ArrivalsViewState.Content) {
+                updatedState.copy(isRefreshing = false)
+            } else {
+                updatedState
+            }
+            WidgetStateManager.setState(appContext, finalState)
             WidgetStateManager.updateAllWidgets(appContext)
         } else {
             val msg = fallbackErrorMessage ?: "Unable to fetch transit departures"
@@ -164,16 +196,52 @@ class ArrivalsUpdateWorker(
 
     @SuppressLint("MissingPermission")
     private suspend fun getFreshLocation(): UserCoordinates? {
+        val simulatedHub = settingsRepository.getSelectedSimulationHub()
+        if (simulatedHub != null) {
+            return UserCoordinates(
+                lat = simulatedHub.lat,
+                lon = simulatedHub.lon,
+                timestamp = Instant.now(),
+                accuracyMeters = 1.0f
+            )
+        }
+
+        val hasFine = appContext.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        val hasCoarse = appContext.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (!hasFine && !hasCoarse) {
+            return null
+        }
+
         return try {
             val fusedClient = LocationServices.getFusedLocationProviderClient(appContext)
-            val androidLocation = fusedClient.lastLocation.await()
-            if (androidLocation != null) {
-                UserCoordinates(
-                    lat = androidLocation.latitude,
-                    lon = androidLocation.longitude,
-                    timestamp = Instant.ofEpochMilli(androidLocation.time)
+
+            // 1. Actively query high-accuracy GPS fix with 8s timeout
+            val cts = CancellationTokenSource()
+            val freshLocation = withTimeoutOrNull(8_000) {
+                fusedClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token).await()
+            }
+
+            if (freshLocation != null) {
+                return UserCoordinates(
+                    lat = freshLocation.latitude,
+                    lon = freshLocation.longitude,
+                    timestamp = Instant.ofEpochMilli(freshLocation.time),
+                    accuracyMeters = freshLocation.accuracy
                 )
-            } else null
+            }
+
+            // 2. Fallback to lastLocation if fresh query timed out
+            val lastLocation = fusedClient.lastLocation.await()
+            if (lastLocation != null) {
+                UserCoordinates(
+                    lat = lastLocation.latitude,
+                    lon = lastLocation.longitude,
+                    timestamp = Instant.ofEpochMilli(lastLocation.time),
+                    accuracyMeters = lastLocation.accuracy
+                )
+            } else {
+                null
+            }
         } catch (e: Exception) {
             null
         }

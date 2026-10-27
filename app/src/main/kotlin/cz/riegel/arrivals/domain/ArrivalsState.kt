@@ -27,7 +27,8 @@ sealed interface ArrivalsViewState {
         val activeStopIndex: Int = 0,
         val activePlatformCode: String = "",
         val userCoordinates: Coordinates? = null,
-        val cachedWarning: String? = null
+        val cachedWarning: String? = null,
+        val isRefreshing: Boolean = false
     ) : ArrivalsViewState {
         val activeStop: Stop
             get() = stops.getOrElse(activeStopIndex) { stops.first() }
@@ -49,6 +50,7 @@ sealed interface ArrivalsAction {
     data object PreviousStop : ArrivalsAction
     data class SelectPlatform(val code: String) : ArrivalsAction
     data object Refresh : ArrivalsAction
+    data class SetRefreshing(val isRefreshing: Boolean) : ArrivalsAction
     data class UpdateData(
         val stops: List<Stop>,
         val userCoordinates: Coordinates? = null,

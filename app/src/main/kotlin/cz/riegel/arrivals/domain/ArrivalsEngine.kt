@@ -86,8 +86,14 @@ class ArrivalsEngine {
             }
             is ArrivalsAction.Refresh -> {
                 when (state) {
-                    is ArrivalsViewState.Content -> state
+                    is ArrivalsViewState.Content -> state.copy(isRefreshing = true)
                     else -> ArrivalsViewState.Loading()
+                }
+            }
+            is ArrivalsAction.SetRefreshing -> {
+                when (state) {
+                    is ArrivalsViewState.Content -> state.copy(isRefreshing = action.isRefreshing)
+                    else -> state
                 }
             }
         }

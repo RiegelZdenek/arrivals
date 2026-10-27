@@ -19,4 +19,10 @@
     <string name="retry">↻ Retry</string>
     <string name="min_unit">min</string>
     <string name="less_than_one_min">&lt;1 min</string>
+    <string name="location_section_title">GPS Location &amp; Stop Preview</string>
+    <string name="refresh_location">Refresh GPS Fix</string>
+    <string name="grant_permission">Grant Location Permission</string>
+    <string name="simulation_section_title">Prague Stop Simulation (for Emulators / Testing)</string>
+    <string name="testing_connection">Testing connection to Golemio…</string>
+    <string name="saving">Saving settings…</string>
 </resources>
