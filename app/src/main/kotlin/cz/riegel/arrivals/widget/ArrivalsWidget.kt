@@ -252,7 +252,7 @@ fun ArrivalsWidgetContent(state: ArrivalsViewState) {
                     // Header Row: Stop name, Distance badge, Refresh & Pagination
                     HeaderRow(state = state)
 
-                    Spacer(modifier = GlanceModifier.height(6.dp))
+                    Spacer(modifier = GlanceModifier.height(8.dp))
 
                     // Platform selector pills (if platforms exist)
                     if (state.activeStop.platforms.size > 1) {
@@ -260,7 +260,7 @@ fun ArrivalsWidgetContent(state: ArrivalsViewState) {
                             platforms = state.activeStop.platforms,
                             selectedCode = state.activePlatformCode
                         )
-                        Spacer(modifier = GlanceModifier.height(6.dp))
+                        Spacer(modifier = GlanceModifier.height(8.dp))
                     }
 
                     // Departures List (responsive compact vs standard)
@@ -327,39 +327,74 @@ fun HeaderRow(state: ArrivalsViewState.Content) {
 
         // Stop cycling controls (◀ ▶)
         if (state.hasMultipleStops) {
-            Text(
-                text = "◀",
+            val prevAction = actionRunCallback<PrevStopActionCallback>()
+            val nextAction = actionRunCallback<NextStopActionCallback>()
+
+            Box(
                 modifier = GlanceModifier
-                    .padding(horizontal = 4.dp)
-                    .clickable(actionRunCallback<PrevStopActionCallback>()),
-                style = TextStyle(color = androidx.glance.unit.ColorProvider(Color.LightGray), fontSize = 14.sp)
-            )
-            Text(
-                text = "▶",
+                    .background(Color(0xFF2C2A34))
+                    .cornerRadius(10.dp)
+                    .padding(horizontal = 11.dp, vertical = 6.dp)
+                    .clickable(prevAction),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "◀",
+                    modifier = GlanceModifier.clickable(prevAction),
+                    style = TextStyle(color = androidx.glance.unit.ColorProvider(Color.White), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                )
+            }
+
+            Spacer(modifier = GlanceModifier.width(8.dp))
+
+            Box(
                 modifier = GlanceModifier
-                    .padding(horizontal = 4.dp)
-                    .clickable(actionRunCallback<NextStopActionCallback>()),
-                style = TextStyle(color = androidx.glance.unit.ColorProvider(Color.LightGray), fontSize = 14.sp)
-            )
-            Spacer(modifier = GlanceModifier.width(4.dp))
+                    .background(Color(0xFF2C2A34))
+                    .cornerRadius(10.dp)
+                    .padding(horizontal = 11.dp, vertical = 6.dp)
+                    .clickable(nextAction),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "▶",
+                    modifier = GlanceModifier.clickable(nextAction),
+                    style = TextStyle(color = androidx.glance.unit.ColorProvider(Color.White), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                )
+            }
+
+            Spacer(modifier = GlanceModifier.width(10.dp))
         }
 
-        // Refresh icon (↻) or spinner
+        // Refresh button (↻) or spinner
         if (state.isRefreshing) {
-            CircularProgressIndicator(
+            Box(
                 modifier = GlanceModifier
-                    .size(16.dp)
-                    .padding(start = 4.dp),
-                color = androidx.glance.unit.ColorProvider(Color(0xFF81B0FF))
-            )
+                    .background(Color(0xFF2C2A34))
+                    .cornerRadius(10.dp)
+                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    modifier = GlanceModifier.size(20.dp),
+                    color = androidx.glance.unit.ColorProvider(Color(0xFF81B0FF))
+                )
+            }
         } else {
-            Text(
-                text = "↻",
+            val refreshAction = actionRunCallback<RefreshActionCallback>()
+            Box(
                 modifier = GlanceModifier
-                    .padding(start = 4.dp)
-                    .clickable(actionRunCallback<RefreshActionCallback>()),
-                style = TextStyle(color = androidx.glance.unit.ColorProvider(Color(0xFF81B0FF)), fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            )
+                    .background(Color(0xFF2C2A34))
+                    .cornerRadius(10.dp)
+                    .padding(horizontal = 11.dp, vertical = 5.dp)
+                    .clickable(refreshAction),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "↻",
+                    modifier = GlanceModifier.clickable(refreshAction),
+                    style = TextStyle(color = androidx.glance.unit.ColorProvider(Color(0xFF81B0FF)), fontWeight = FontWeight.Bold, fontSize = 19.sp)
+                )
+            }
         }
     }
 }
@@ -381,8 +416,8 @@ fun PlatformPillsRow(platforms: List<Platform>, selectedCode: String) {
             Box(
                 modifier = GlanceModifier
                     .background(pillBg)
-                    .cornerRadius(10.dp)
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .cornerRadius(12.dp)
+                    .padding(horizontal = 14.dp, vertical = 6.dp)
                     .clickable(selectAction),
                 contentAlignment = Alignment.Center
             ) {
@@ -392,12 +427,12 @@ fun PlatformPillsRow(platforms: List<Platform>, selectedCode: String) {
                     style = TextStyle(
                         color = androidx.glance.unit.ColorProvider(textColor),
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                        fontSize = 11.sp
+                        fontSize = 13.sp
                     )
                 )
             }
             if (index < platforms.lastIndex) {
-                Spacer(modifier = GlanceModifier.width(6.dp))
+                Spacer(modifier = GlanceModifier.width(10.dp))
             }
         }
     }
