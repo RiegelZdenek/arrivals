@@ -1,6 +1,7 @@
 package cz.riegel.arrivals.widget
 
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import cz.riegel.arrivals.domain.ArrivalsViewState
 import cz.riegel.arrivals.domain.model.Coordinates
 import cz.riegel.arrivals.domain.model.CountdownDisplay
@@ -165,6 +166,32 @@ class ArrivalsWidgetContentTest {
         val multiStopState = ArrivalsViewState.Content(stops = listOf(stop1, stop2))
         assertTrue(multiStopState.hasMultipleStops)
         assertEquals("I. P. Pavlova ▾", multiStopState.headerStopNameText)
+    }
+
+    @Test
+    fun headerDimensions_standardizedSizesAndWhitespace() {
+        // Unified action buttons (refresh, back, spinner) fixed 28x28 dp box with 8 dp corner radius
+        assertEquals(28.dp, HeaderDimens.ACTION_BUTTON_SIZE)
+        assertEquals(8.dp, HeaderDimens.ACTION_BUTTON_CORNER_RADIUS)
+        assertEquals(14.dp, HeaderDimens.ACTION_BUTTON_ICON_SIZE)
+        assertEquals(14.sp, HeaderDimens.ACTION_BUTTON_FONT_SIZE)
+
+        // Platform pill fixed 28 dp height, 8 dp horizontal padding, and 8 dp corner radius
+        assertEquals(28.dp, HeaderDimens.PLATFORM_PILL_HEIGHT)
+        assertEquals(8.dp, HeaderDimens.PLATFORM_PILL_CORNER_RADIUS)
+        assertEquals(8.dp, HeaderDimens.PLATFORM_PILL_HORIZONTAL_PADDING)
+
+        // Stop name clickable area padding (6 dp horizontal, 4 dp vertical)
+        assertEquals(6.dp, HeaderDimens.STOP_NAME_HORIZONTAL_PADDING)
+        assertEquals(4.dp, HeaderDimens.STOP_NAME_VERTICAL_PADDING)
+
+        // Header item spacing (8 dp between Stop Name, Platform Pill, and Distance Badge)
+        assertEquals(8.dp, HeaderDimens.HEADER_SPACING)
+
+        // Distance badge compact ~22 dp height (6 dp horizontal, 2 dp vertical padding, 8 dp corner radius)
+        assertEquals(8.dp, HeaderDimens.DISTANCE_BADGE_CORNER_RADIUS)
+        assertEquals(6.dp, HeaderDimens.DISTANCE_BADGE_HORIZONTAL_PADDING)
+        assertEquals(2.dp, HeaderDimens.DISTANCE_BADGE_VERTICAL_PADDING)
     }
 
     @Test

@@ -162,6 +162,26 @@ class RefreshActionCallback : ActionCallback {
     }
 }
 
+object HeaderDimens {
+    val ACTION_BUTTON_SIZE = 28.dp
+    val ACTION_BUTTON_CORNER_RADIUS = 8.dp
+    val ACTION_BUTTON_ICON_SIZE = 14.dp
+    val ACTION_BUTTON_FONT_SIZE = 14.sp
+
+    val PLATFORM_PILL_HEIGHT = 28.dp
+    val PLATFORM_PILL_CORNER_RADIUS = 8.dp
+    val PLATFORM_PILL_HORIZONTAL_PADDING = 8.dp
+
+    val STOP_NAME_HORIZONTAL_PADDING = 6.dp
+    val STOP_NAME_VERTICAL_PADDING = 4.dp
+
+    val HEADER_SPACING = 8.dp
+
+    val DISTANCE_BADGE_CORNER_RADIUS = 8.dp
+    val DISTANCE_BADGE_HORIZONTAL_PADDING = 6.dp
+    val DISTANCE_BADGE_VERTICAL_PADDING = 2.dp
+}
+
 fun maxDeparturesForHeight(height: Dp): Int =
     if (height < 180.dp) {
         ArrivalsViewState.Content.COMPACT_MAX_DEPARTURES
@@ -376,33 +396,36 @@ fun HeaderRow(state: ArrivalsViewState.Content) {
         modifier = GlanceModifier.fillMaxWidth(),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Stop Name (opens Stop Picker when multiple stops exist)
-        val stopNameModifier = if (state.hasMultipleStops) {
-            GlanceModifier.clickable(actionRunCallback<OpenStopPickerActionCallback>())
-        } else {
-            GlanceModifier
+        // Stop Name (opens Stop Picker when multiple stops exist) with explicit padding
+        val stopNameBoxModifier = GlanceModifier
+            .padding(horizontal = HeaderDimens.STOP_NAME_HORIZONTAL_PADDING, vertical = HeaderDimens.STOP_NAME_VERTICAL_PADDING)
+            .let { if (state.hasMultipleStops) it.clickable(actionRunCallback<OpenStopPickerActionCallback>()) else it }
+        Box(
+            modifier = stopNameBoxModifier,
+            contentAlignment = Alignment.CenterStart
+        ) {
+            Text(
+                text = state.headerStopNameText,
+                style = TextStyle(
+                    color = androidx.glance.unit.ColorProvider(Color.White),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp
+                ),
+                maxLines = 1
+            )
         }
-        Text(
-            text = state.headerStopNameText,
-            modifier = stopNameModifier,
-            style = TextStyle(
-                color = androidx.glance.unit.ColorProvider(Color.White),
-                fontWeight = FontWeight.Bold,
-                fontSize = 15.sp
-            ),
-            maxLines = 1
-        )
 
         // Active Platform pill (when visible per multi/single platform rules)
         val pillText = state.headerPlatformPillText
         if (pillText != null) {
             val openPlatformPickerAction = actionRunCallback<OpenPlatformPickerActionCallback>()
             val pillBoxModifier = GlanceModifier
+                .height(HeaderDimens.PLATFORM_PILL_HEIGHT)
                 .background(Color(0xFF2C2A34))
-                .cornerRadius(8.dp)
-                .padding(horizontal = 8.dp, vertical = 3.dp)
+                .cornerRadius(HeaderDimens.PLATFORM_PILL_CORNER_RADIUS)
+                .padding(horizontal = HeaderDimens.PLATFORM_PILL_HORIZONTAL_PADDING)
                 .let { if (state.hasMultiplePlatforms) it.clickable(openPlatformPickerAction) else it }
-            Spacer(modifier = GlanceModifier.width(6.dp))
+            Spacer(modifier = GlanceModifier.width(HeaderDimens.HEADER_SPACING))
             Box(
                 modifier = pillBoxModifier,
                 contentAlignment = Alignment.Center
@@ -422,7 +445,7 @@ fun HeaderRow(state: ArrivalsViewState.Content) {
         // Walking distance badge to the selected platform (falling back to stop distance), launches map intent
         val displayDistance = state.activeDistanceMeters
         if (displayDistance != null) {
-            Spacer(modifier = GlanceModifier.width(6.dp))
+            Spacer(modifier = GlanceModifier.width(HeaderDimens.HEADER_SPACING))
             DistanceBadge(distanceMeters = displayDistance, action = mapAction)
         }
 
@@ -441,9 +464,9 @@ fun PickerHeaderRow(state: ArrivalsViewState.Content) {
     ) {
         Box(
             modifier = GlanceModifier
+                .size(HeaderDimens.ACTION_BUTTON_SIZE)
                 .background(Color(0xFF2C2A34))
-                .cornerRadius(10.dp)
-                .padding(horizontal = 11.dp, vertical = 5.dp)
+                .cornerRadius(HeaderDimens.ACTION_BUTTON_CORNER_RADIUS)
                 .clickable(closeAction),
             contentAlignment = Alignment.Center
         ) {
@@ -452,7 +475,7 @@ fun PickerHeaderRow(state: ArrivalsViewState.Content) {
                 style = TextStyle(
                     color = androidx.glance.unit.ColorProvider(Color.White),
                     fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp
+                    fontSize = HeaderDimens.ACTION_BUTTON_FONT_SIZE
                 )
             )
         }
@@ -468,13 +491,13 @@ fun RefreshButtonOrSpinner(isRefreshing: Boolean) {
     if (isRefreshing) {
         Box(
             modifier = GlanceModifier
+                .size(HeaderDimens.ACTION_BUTTON_SIZE)
                 .background(Color(0xFF2C2A34))
-                .cornerRadius(10.dp)
-                .padding(horizontal = 10.dp, vertical = 6.dp),
+                .cornerRadius(HeaderDimens.ACTION_BUTTON_CORNER_RADIUS),
             contentAlignment = Alignment.Center
         ) {
             CircularProgressIndicator(
-                modifier = GlanceModifier.size(20.dp),
+                modifier = GlanceModifier.size(HeaderDimens.ACTION_BUTTON_ICON_SIZE),
                 color = androidx.glance.unit.ColorProvider(Color(0xFF81B0FF))
             )
         }
@@ -482,9 +505,9 @@ fun RefreshButtonOrSpinner(isRefreshing: Boolean) {
         val refreshAction = actionRunCallback<RefreshActionCallback>()
         Box(
             modifier = GlanceModifier
+                .size(HeaderDimens.ACTION_BUTTON_SIZE)
                 .background(Color(0xFF2C2A34))
-                .cornerRadius(10.dp)
-                .padding(horizontal = 11.dp, vertical = 5.dp)
+                .cornerRadius(HeaderDimens.ACTION_BUTTON_CORNER_RADIUS)
                 .clickable(refreshAction),
             contentAlignment = Alignment.Center
         ) {
@@ -493,7 +516,7 @@ fun RefreshButtonOrSpinner(isRefreshing: Boolean) {
                 style = TextStyle(
                     color = androidx.glance.unit.ColorProvider(Color(0xFF81B0FF)),
                     fontWeight = FontWeight.Bold,
-                    fontSize = 19.sp
+                    fontSize = HeaderDimens.ACTION_BUTTON_FONT_SIZE
                 )
             )
         }
@@ -635,8 +658,11 @@ fun DistanceBadge(distanceMeters: Int, action: Action) {
     Box(
         modifier = GlanceModifier
             .background(Color(0xFF2E2C36))
-            .cornerRadius(8.dp)
-            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .cornerRadius(HeaderDimens.DISTANCE_BADGE_CORNER_RADIUS)
+            .padding(
+                horizontal = HeaderDimens.DISTANCE_BADGE_HORIZONTAL_PADDING,
+                vertical = HeaderDimens.DISTANCE_BADGE_VERTICAL_PADDING
+            )
             .clickable(action)
     ) {
         Text(
