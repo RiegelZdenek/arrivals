@@ -177,6 +177,9 @@ object HeaderDimens {
 
     val HEADER_SPACING = 8.dp
 
+}
+
+object BadgeDimens {
     val DISTANCE_BADGE_CORNER_RADIUS = 8.dp
     val DISTANCE_BADGE_HORIZONTAL_PADDING = 6.dp
     val DISTANCE_BADGE_VERTICAL_PADDING = 2.dp
@@ -683,10 +686,10 @@ fun DistanceBadge(distanceMeters: Int, action: Action) {
     Box(
         modifier = GlanceModifier
             .background(Color(0xFF2E2C36))
-            .cornerRadius(HeaderDimens.DISTANCE_BADGE_CORNER_RADIUS)
+            .cornerRadius(BadgeDimens.DISTANCE_BADGE_CORNER_RADIUS)
             .padding(
-                horizontal = HeaderDimens.DISTANCE_BADGE_HORIZONTAL_PADDING,
-                vertical = HeaderDimens.DISTANCE_BADGE_VERTICAL_PADDING
+                horizontal = BadgeDimens.DISTANCE_BADGE_HORIZONTAL_PADDING,
+                vertical = BadgeDimens.DISTANCE_BADGE_VERTICAL_PADDING
             )
             .clickable(action)
     ) {

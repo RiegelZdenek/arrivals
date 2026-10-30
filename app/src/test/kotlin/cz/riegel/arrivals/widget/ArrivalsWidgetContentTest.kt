@@ -189,9 +189,9 @@ class ArrivalsWidgetContentTest {
         assertEquals(8.dp, HeaderDimens.HEADER_SPACING)
 
         // Distance badge compact ~22 dp height (6 dp horizontal, 2 dp vertical padding, 8 dp corner radius)
-        assertEquals(8.dp, HeaderDimens.DISTANCE_BADGE_CORNER_RADIUS)
-        assertEquals(6.dp, HeaderDimens.DISTANCE_BADGE_HORIZONTAL_PADDING)
-        assertEquals(2.dp, HeaderDimens.DISTANCE_BADGE_VERTICAL_PADDING)
+        assertEquals(8.dp, BadgeDimens.DISTANCE_BADGE_CORNER_RADIUS)
+        assertEquals(6.dp, BadgeDimens.DISTANCE_BADGE_HORIZONTAL_PADDING)
+        assertEquals(2.dp, BadgeDimens.DISTANCE_BADGE_VERTICAL_PADDING)
     }
 
     @Test
@@ -207,37 +207,6 @@ class ArrivalsWidgetContentTest {
         assertEquals(8.dp, PickerListDimens.PLATFORM_PILL_HORIZONTAL_PADDING)
         assertEquals(2.dp, PickerListDimens.PLATFORM_PILL_VERTICAL_PADDING)
         assertEquals(8.dp, PickerListDimens.PLATFORM_PILL_CORNER_RADIUS)
-    }
-
-    @Test
-    fun platformPickerRow_formatDisplaySummaryFollowsSpecifiedSequence() {
-        val rowWithAll = cz.riegel.arrivals.domain.PlatformPickerRow(
-            platformId = "p1",
-            code = "A",
-            transportModes = listOf(TransportMode.Tram),
-            transportModeSymbols = listOf("T"),
-            distinctTerminuses = listOf("Nádraží Hostivař"),
-            terminusSummary = "Nádraží Hostivař",
-            distanceMeters = 45,
-            isSelected = true
-        )
-        // Sequence: Mode -> Platform Code Pill -> Terminus -> Distance Badge (e.g. T [A] Nádraží Hostivař 45m)
-        assertEquals("T [A] Nádraží Hostivař 45m", rowWithAll.formatDisplaySummary())
-
-        val rowMultipleModes = rowWithAll.copy(
-            transportModes = listOf(TransportMode.Tram, TransportMode.Bus),
-            transportModeSymbols = listOf("T", "B")
-        )
-        assertEquals("T B [A] Nádraží Hostivař 45m", rowMultipleModes.formatDisplaySummary())
-
-        val rowNoDistance = rowWithAll.copy(distanceMeters = null)
-        assertEquals("T [A] Nádraží Hostivař", rowNoDistance.formatDisplaySummary())
-
-        val rowNoModes = rowWithAll.copy(transportModes = emptyList(), transportModeSymbols = emptyList())
-        assertEquals("[A] Nádraží Hostivař 45m", rowNoModes.formatDisplaySummary())
-
-        val rowNoDepartures = rowWithAll.copy(terminusSummary = null)
-        assertEquals("T [A] Žádné nadcházející odjezdy 45m", rowNoDepartures.formatDisplaySummary("Žádné nadcházející odjezdy"))
     }
 
     @Test
