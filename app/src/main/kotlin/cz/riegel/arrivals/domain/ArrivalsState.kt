@@ -34,6 +34,12 @@ data class PlatformPickerRow(
 ) {
     fun displayTerminusText(noDeparturesPlaceholder: String = "No upcoming departures"): String =
         terminusSummary ?: noDeparturesPlaceholder
+
+    fun formatDisplaySummary(noDeparturesPlaceholder: String = "No upcoming departures"): String {
+        val modeStr = if (transportModeSymbols.isNotEmpty()) "${transportModeSymbols.joinToString(" ")} " else ""
+        val distStr = if (distanceMeters != null) " ${distanceMeters}m" else ""
+        return "$modeStr[$code] ${displayTerminusText(noDeparturesPlaceholder)}$distStr"
+    }
 }
 
 sealed interface ArrivalsViewState {

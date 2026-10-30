@@ -182,6 +182,18 @@ object HeaderDimens {
     val DISTANCE_BADGE_VERTICAL_PADDING = 2.dp
 }
 
+object PickerListDimens {
+    val CARD_BOTTOM_SPACING = 6.dp
+    val ROW_HORIZONTAL_PADDING = 10.dp
+    val ROW_VERTICAL_PADDING = 6.dp
+    val ROW_CORNER_RADIUS = 8.dp
+    val ITEM_SPACING = 8.dp
+
+    val PLATFORM_PILL_HORIZONTAL_PADDING = 8.dp
+    val PLATFORM_PILL_VERTICAL_PADDING = 2.dp
+    val PLATFORM_PILL_CORNER_RADIUS = 8.dp
+}
+
 fun maxDeparturesForHeight(height: Dp): Int =
     if (height < 180.dp) {
         ArrivalsViewState.Content.COMPACT_MAX_DEPARTURES
@@ -533,13 +545,16 @@ fun StopPickerList(state: ArrivalsViewState.Content) {
                 actionParametersOf(StopIndexKey to row.stopIndex)
             )
 
-            Box(modifier = GlanceModifier.fillMaxWidth().padding(bottom = 4.dp)) {
+            Box(modifier = GlanceModifier.fillMaxWidth().padding(bottom = PickerListDimens.CARD_BOTTOM_SPACING)) {
                 Row(
                     modifier = GlanceModifier
                         .fillMaxWidth()
                         .background(rowBg)
-                        .cornerRadius(8.dp)
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .cornerRadius(PickerListDimens.ROW_CORNER_RADIUS)
+                        .padding(
+                            horizontal = PickerListDimens.ROW_HORIZONTAL_PADDING,
+                            vertical = PickerListDimens.ROW_VERTICAL_PADDING
+                        )
                         .clickable(selectAction),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -554,7 +569,7 @@ fun StopPickerList(state: ArrivalsViewState.Content) {
                     )
 
                     if (row.transportModeSymbols.isNotEmpty()) {
-                        Spacer(modifier = GlanceModifier.width(6.dp))
+                        Spacer(modifier = GlanceModifier.width(PickerListDimens.ITEM_SPACING))
                         Text(
                             text = row.transportModeSymbols.joinToString(" "),
                             style = TextStyle(
@@ -591,21 +606,41 @@ fun PlatformPickerList(state: ArrivalsViewState.Content) {
                 actionParametersOf(PlatformCodeKey to row.code)
             )
 
-            Box(modifier = GlanceModifier.fillMaxWidth().padding(bottom = 4.dp)) {
+            Box(modifier = GlanceModifier.fillMaxWidth().padding(bottom = PickerListDimens.CARD_BOTTOM_SPACING)) {
                 Row(
                     modifier = GlanceModifier
                         .fillMaxWidth()
                         .background(rowBg)
-                        .cornerRadius(8.dp)
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .cornerRadius(PickerListDimens.ROW_CORNER_RADIUS)
+                        .padding(
+                            horizontal = PickerListDimens.ROW_HORIZONTAL_PADDING,
+                            vertical = PickerListDimens.ROW_VERTICAL_PADDING
+                        )
                         .clickable(selectAction),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // 1. Mode letter indicator(s) (e.g. "T", "T B")
+                    if (row.transportModeSymbols.isNotEmpty()) {
+                        Text(
+                            text = row.transportModeSymbols.joinToString(" "),
+                            style = TextStyle(
+                                color = androidx.glance.unit.ColorProvider(Color(0xFFB0B0C0)),
+                                fontSize = 12.sp
+                            ),
+                            maxLines = 1
+                        )
+                        Spacer(modifier = GlanceModifier.width(PickerListDimens.ITEM_SPACING))
+                    }
+
+                    // 2. Platform code pill (compact ~22 dp height, 8 dp horizontal and 2 dp vertical padding)
                     Box(
                         modifier = GlanceModifier
                             .background(pillBg)
-                            .cornerRadius(8.dp)
-                            .padding(horizontal = 8.dp, vertical = 2.dp),
+                            .cornerRadius(PickerListDimens.PLATFORM_PILL_CORNER_RADIUS)
+                            .padding(
+                                horizontal = PickerListDimens.PLATFORM_PILL_HORIZONTAL_PADDING,
+                                vertical = PickerListDimens.PLATFORM_PILL_VERTICAL_PADDING
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
@@ -619,19 +654,8 @@ fun PlatformPickerList(state: ArrivalsViewState.Content) {
                         )
                     }
 
-                    if (row.transportModeSymbols.isNotEmpty()) {
-                        Spacer(modifier = GlanceModifier.width(6.dp))
-                        Text(
-                            text = row.transportModeSymbols.joinToString(" "),
-                            style = TextStyle(
-                                color = androidx.glance.unit.ColorProvider(Color(0xFFB0B0C0)),
-                                fontSize = 12.sp
-                            ),
-                            maxLines = 1
-                        )
-                    }
-
-                    Spacer(modifier = GlanceModifier.width(6.dp))
+                    // 3. Terminus summary
+                    Spacer(modifier = GlanceModifier.width(PickerListDimens.ITEM_SPACING))
 
                     Text(
                         text = row.displayTerminusText(noDeparturesText),
@@ -643,8 +667,9 @@ fun PlatformPickerList(state: ArrivalsViewState.Content) {
                         maxLines = 1
                     )
 
+                    // 4. Distance badge
                     if (row.distanceMeters != null) {
-                        Spacer(modifier = GlanceModifier.width(6.dp))
+                        Spacer(modifier = GlanceModifier.width(PickerListDimens.ITEM_SPACING))
                         DistanceBadge(distanceMeters = row.distanceMeters, action = selectAction)
                     }
                 }

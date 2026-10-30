@@ -195,6 +195,52 @@ class ArrivalsWidgetContentTest {
     }
 
     @Test
+    fun pickerListDimensions_standardizedSizesAndWhitespace() {
+        // Picker list rows maintain 6 dp vertical padding with 6 dp spacing between cards
+        assertEquals(6.dp, PickerListDimens.CARD_BOTTOM_SPACING)
+        assertEquals(10.dp, PickerListDimens.ROW_HORIZONTAL_PADDING)
+        assertEquals(6.dp, PickerListDimens.ROW_VERTICAL_PADDING)
+        assertEquals(8.dp, PickerListDimens.ROW_CORNER_RADIUS)
+        assertEquals(8.dp, PickerListDimens.ITEM_SPACING)
+
+        // Platform code pill inside picker rows keeps a compact ~22 dp height with 8 dp horizontal and 2 dp vertical padding
+        assertEquals(8.dp, PickerListDimens.PLATFORM_PILL_HORIZONTAL_PADDING)
+        assertEquals(2.dp, PickerListDimens.PLATFORM_PILL_VERTICAL_PADDING)
+        assertEquals(8.dp, PickerListDimens.PLATFORM_PILL_CORNER_RADIUS)
+    }
+
+    @Test
+    fun platformPickerRow_formatDisplaySummaryFollowsSpecifiedSequence() {
+        val rowWithAll = cz.riegel.arrivals.domain.PlatformPickerRow(
+            platformId = "p1",
+            code = "A",
+            transportModes = listOf(TransportMode.Tram),
+            transportModeSymbols = listOf("T"),
+            distinctTerminuses = listOf("Nádraží Hostivař"),
+            terminusSummary = "Nádraží Hostivař",
+            distanceMeters = 45,
+            isSelected = true
+        )
+        // Sequence: Mode -> Platform Code Pill -> Terminus -> Distance Badge (e.g. T [A] Nádraží Hostivař 45m)
+        assertEquals("T [A] Nádraží Hostivař 45m", rowWithAll.formatDisplaySummary())
+
+        val rowMultipleModes = rowWithAll.copy(
+            transportModes = listOf(TransportMode.Tram, TransportMode.Bus),
+            transportModeSymbols = listOf("T", "B")
+        )
+        assertEquals("T B [A] Nádraží Hostivař 45m", rowMultipleModes.formatDisplaySummary())
+
+        val rowNoDistance = rowWithAll.copy(distanceMeters = null)
+        assertEquals("T [A] Nádraží Hostivař", rowNoDistance.formatDisplaySummary())
+
+        val rowNoModes = rowWithAll.copy(transportModes = emptyList(), transportModeSymbols = emptyList())
+        assertEquals("[A] Nádraží Hostivař 45m", rowNoModes.formatDisplaySummary())
+
+        val rowNoDepartures = rowWithAll.copy(terminusSummary = null)
+        assertEquals("T [A] Žádné nadcházející odjezdy 45m", rowNoDepartures.formatDisplaySummary("Žádné nadcházející odjezdy"))
+    }
+
+    @Test
     fun widgetState_cachedWarningIsRenderedWhenPresent() {
         val stop = Stop("s1", "Anděl", distanceMeters = 50, platforms = emptyList())
         val state = ArrivalsViewState.Content(
