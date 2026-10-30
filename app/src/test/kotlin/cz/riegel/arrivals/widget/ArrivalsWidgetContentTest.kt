@@ -179,4 +179,13 @@ class ArrivalsWidgetContentTest {
 
         assertEquals("Cached 15:42 • Tap to retry", state.cachedWarning)
     }
+
+    @Test
+    fun skeletonRowCountForHeight_compactAndStandardHeights() {
+        assertEquals(2, skeletonRowCountForHeight(110.dp))
+        assertEquals(2, skeletonRowCountForHeight(179.dp))
+        assertEquals(4, skeletonRowCountForHeight(180.dp))
+        assertEquals(4, skeletonRowCountForHeight(250.dp))
+        assertEquals(4, skeletonRowCountForHeight(340.dp))
+    }
 }

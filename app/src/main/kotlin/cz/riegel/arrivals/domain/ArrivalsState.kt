@@ -60,6 +60,7 @@ sealed interface ArrivalsViewState {
         val userCoordinates: Coordinates? = null,
         val cachedWarning: String? = null,
         val isRefreshing: Boolean = false,
+        val isLoadingDepartures: Boolean = false,
         val pickerMode: PickerMode = PickerMode.Departures
     ) : ArrivalsViewState {
         val activeStop: Stop
@@ -142,6 +143,8 @@ sealed interface ArrivalsViewState {
         companion object {
             const val COMPACT_MAX_DEPARTURES = 4
             const val STANDARD_MAX_DEPARTURES = 7
+            const val COMPACT_SKELETON_COUNT = 2
+            const val STANDARD_SKELETON_COUNT = 4
         }
     }
 }

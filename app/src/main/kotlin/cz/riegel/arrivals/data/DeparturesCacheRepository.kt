@@ -60,11 +60,10 @@ class DeparturesCacheRepository(context: Context) {
         )
     }
 
-    fun saveActiveSelection(stopIndex: Int, platformCode: String, pickerMode: String = "Departures") {
+    fun saveActiveSelection(stopIndex: Int, platformCode: String) {
         prefs.edit()
             .putInt(KEY_ACTIVE_STOP_INDEX, stopIndex)
             .putString(KEY_ACTIVE_PLATFORM_CODE, platformCode)
-            .putString(KEY_ACTIVE_PICKER_MODE, pickerMode)
             .apply()
     }
 

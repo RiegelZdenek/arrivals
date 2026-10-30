@@ -102,16 +102,22 @@ object WidgetStateManager {
     }
 
     fun setState(context: Context, newState: ArrivalsViewState) {
+        val previousState = _stateFlow.value
         _stateFlow.value = newState
         if (newState is ArrivalsViewState.Content) {
-            try {
-                DeparturesCacheRepository(context).saveActiveSelection(
-                    newState.activeStopIndex,
-                    newState.activePlatformCode,
-                    newState.pickerMode.name
-                )
-            } catch (e: Exception) {
-                // Ignore in non-Android test environments if needed
+            val isTransientPickerToggle = previousState is ArrivalsViewState.Content &&
+                previousState.activeStopIndex == newState.activeStopIndex &&
+                previousState.activePlatformCode == newState.activePlatformCode
+
+            if (!isTransientPickerToggle) {
+                try {
+                    DeparturesCacheRepository(context).saveActiveSelection(
+                        newState.activeStopIndex,
+                        newState.activePlatformCode
+                    )
+                } catch (e: Exception) {
+                    // Ignore in non-Android test environments if needed
+                }
             }
         }
     }
@@ -132,8 +138,14 @@ object WidgetStateManager {
     suspend fun onClosePicker(context: Context) =
         dispatch(context, ArrivalsAction.ClosePicker)
 
-    suspend fun onSelectStop(context: Context, stopIndex: Int) =
+    suspend fun onSelectStop(context: Context, stopIndex: Int) {
+        val current = getState(context)
+        val isDifferentStop = current is ArrivalsViewState.Content && current.activeStopIndex != stopIndex
         dispatch(context, ArrivalsAction.SelectStop(stopIndex))
+        if (isDifferentStop) {
+            ArrivalsUpdateWorker.enqueueOneTimeWork(context)
+        }
+    }
 
     suspend fun onSelectPlatform(context: Context, platformCode: String) =
         dispatch(context, ArrivalsAction.SelectPlatform(platformCode))

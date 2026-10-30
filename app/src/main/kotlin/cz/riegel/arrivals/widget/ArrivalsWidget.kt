@@ -33,8 +33,6 @@ import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
-import androidx.glance.appwidget.lazy.LazyColumn
-import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.currentState
@@ -169,6 +167,13 @@ fun maxDeparturesForHeight(height: Dp): Int =
         ArrivalsViewState.Content.COMPACT_MAX_DEPARTURES
     } else {
         ArrivalsViewState.Content.STANDARD_MAX_DEPARTURES
+    }
+
+fun skeletonRowCountForHeight(height: Dp): Int =
+    if (height < 180.dp) {
+        ArrivalsViewState.Content.COMPACT_SKELETON_COUNT
+    } else {
+        ArrivalsViewState.Content.STANDARD_SKELETON_COUNT
     }
 
 @Composable
@@ -327,18 +332,26 @@ fun ArrivalsWidgetContent(state: ArrivalsViewState) {
 
                             Spacer(modifier = GlanceModifier.height(8.dp))
 
-                            // Departures List (responsive compact vs standard)
-                            val departures = state.visibleDepartures(isCompact = isCompact)
-                            if (departures.isEmpty()) {
-                                Text(
-                                    text = context.getString(R.string.no_departures),
-                                    style = TextStyle(color = androidx.glance.unit.ColorProvider(Color.Gray), fontSize = 12.sp),
-                                    modifier = GlanceModifier.padding(vertical = 8.dp)
-                                )
-                            } else {
-                                departures.forEach { departure ->
-                                    DepartureRowItem(departure = departure)
+                            if (state.isLoadingDepartures) {
+                                val skeletonCount = skeletonRowCountForHeight(size.height)
+                                repeat(skeletonCount) {
+                                    DepartureSkeletonRowItem()
                                     Spacer(modifier = GlanceModifier.height(4.dp))
+                                }
+                            } else {
+                                // Departures List (responsive compact vs standard)
+                                val departures = state.visibleDepartures(isCompact = isCompact)
+                                if (departures.isEmpty()) {
+                                    Text(
+                                        text = context.getString(R.string.no_departures),
+                                        style = TextStyle(color = androidx.glance.unit.ColorProvider(Color.Gray), fontSize = 12.sp),
+                                        modifier = GlanceModifier.padding(vertical = 8.dp)
+                                    )
+                                } else {
+                                    departures.forEach { departure ->
+                                        DepartureRowItem(departure = departure)
+                                        Spacer(modifier = GlanceModifier.height(4.dp))
+                                    }
                                 }
                             }
                         }
@@ -389,11 +402,6 @@ fun HeaderRow(state: ArrivalsViewState.Content) {
                 .cornerRadius(8.dp)
                 .padding(horizontal = 8.dp, vertical = 3.dp)
                 .let { if (state.hasMultiplePlatforms) it.clickable(openPlatformPickerAction) else it }
-            val pillTextModifier = if (state.hasMultiplePlatforms) {
-                GlanceModifier.clickable(openPlatformPickerAction)
-            } else {
-                GlanceModifier
-            }
             Spacer(modifier = GlanceModifier.width(6.dp))
             Box(
                 modifier = pillBoxModifier,
@@ -401,7 +409,6 @@ fun HeaderRow(state: ArrivalsViewState.Content) {
             ) {
                 Text(
                     text = pillText,
-                    modifier = pillTextModifier,
                     style = TextStyle(
                         color = androidx.glance.unit.ColorProvider(Color.White),
                         fontWeight = FontWeight.Bold,
@@ -442,7 +449,6 @@ fun PickerHeaderRow(state: ArrivalsViewState.Content) {
         ) {
             Text(
                 text = "←",
-                modifier = GlanceModifier.clickable(closeAction),
                 style = TextStyle(
                     color = androidx.glance.unit.ColorProvider(Color.White),
                     fontWeight = FontWeight.Bold,
@@ -484,7 +490,6 @@ fun RefreshButtonOrSpinner(isRefreshing: Boolean) {
         ) {
             Text(
                 text = "↻",
-                modifier = GlanceModifier.clickable(refreshAction),
                 style = TextStyle(
                     color = androidx.glance.unit.ColorProvider(Color(0xFF81B0FF)),
                     fontWeight = FontWeight.Bold,
@@ -497,8 +502,8 @@ fun RefreshButtonOrSpinner(isRefreshing: Boolean) {
 
 @Composable
 fun StopPickerList(state: ArrivalsViewState.Content) {
-    LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
-        items(state.stopPickerRows) { row ->
+    Column(modifier = GlanceModifier.fillMaxSize()) {
+        state.stopPickerRows.forEach { row ->
             val rowBg = if (row.isSelected) Color(0xFF2C3548) else Color(0xFF1E1D24)
             val nameColor = if (row.isSelected) Color(0xFF81B0FF) else Color.White
             val selectAction = actionRunCallback<SelectStopActionCallback>(
@@ -517,7 +522,6 @@ fun StopPickerList(state: ArrivalsViewState.Content) {
                 ) {
                     Text(
                         text = row.name,
-                        modifier = GlanceModifier.clickable(selectAction),
                         style = TextStyle(
                             color = androidx.glance.unit.ColorProvider(nameColor),
                             fontWeight = if (row.isSelected) FontWeight.Bold else FontWeight.Normal,
@@ -530,7 +534,6 @@ fun StopPickerList(state: ArrivalsViewState.Content) {
                         Spacer(modifier = GlanceModifier.width(6.dp))
                         Text(
                             text = row.transportModeSymbols.joinToString(" "),
-                            modifier = GlanceModifier.clickable(selectAction),
                             style = TextStyle(
                                 color = androidx.glance.unit.ColorProvider(Color.LightGray),
                                 fontSize = 12.sp
@@ -555,8 +558,8 @@ fun PlatformPickerList(state: ArrivalsViewState.Content) {
     val context = LocalContext.current
     val noDeparturesText = context.getString(R.string.no_departures)
 
-    LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
-        items(state.platformPickerRows) { row ->
+    Column(modifier = GlanceModifier.fillMaxSize()) {
+        state.platformPickerRows.forEach { row ->
             val rowBg = if (row.isSelected) Color(0xFF2C3548) else Color(0xFF1E1D24)
             val pillBg = if (row.isSelected) Color.White else Color(0xFF2C2A34)
             val pillTextColor = if (row.isSelected) Color.Black else Color.White
@@ -579,13 +582,11 @@ fun PlatformPickerList(state: ArrivalsViewState.Content) {
                         modifier = GlanceModifier
                             .background(pillBg)
                             .cornerRadius(8.dp)
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
-                            .clickable(selectAction),
+                            .padding(horizontal = 8.dp, vertical = 2.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = row.code,
-                            modifier = GlanceModifier.clickable(selectAction),
                             style = TextStyle(
                                 color = androidx.glance.unit.ColorProvider(pillTextColor),
                                 fontWeight = FontWeight.Bold,
@@ -599,7 +600,6 @@ fun PlatformPickerList(state: ArrivalsViewState.Content) {
                         Spacer(modifier = GlanceModifier.width(6.dp))
                         Text(
                             text = row.transportModeSymbols.joinToString(" "),
-                            modifier = GlanceModifier.clickable(selectAction),
                             style = TextStyle(
                                 color = androidx.glance.unit.ColorProvider(Color.LightGray),
                                 fontSize = 12.sp
@@ -612,7 +612,7 @@ fun PlatformPickerList(state: ArrivalsViewState.Content) {
 
                     Text(
                         text = row.displayTerminusText(noDeparturesText),
-                        modifier = GlanceModifier.defaultWeight().clickable(selectAction),
+                        modifier = GlanceModifier.defaultWeight(),
                         style = TextStyle(
                             color = androidx.glance.unit.ColorProvider(terminusColor),
                             fontSize = 12.sp
@@ -641,7 +641,6 @@ fun DistanceBadge(distanceMeters: Int, action: Action) {
     ) {
         Text(
             text = "${distanceMeters}m",
-            modifier = GlanceModifier.clickable(action),
             style = TextStyle(
                 color = androidx.glance.unit.ColorProvider(Color(0xFFB0B0C0)),
                 fontSize = 11.sp
@@ -713,5 +712,49 @@ fun DepartureRowItem(departure: Departure) {
                 fontSize = 13.sp
             )
         )
+    }
+}
+
+@Composable
+fun DepartureSkeletonRowItem() {
+    val skeletonColor = Color(0xFF2A2832)
+    val rowBackground = Color(0xFF1E1D24)
+
+    Row(
+        modifier = GlanceModifier
+            .fillMaxWidth()
+            .background(rowBackground)
+            .cornerRadius(8.dp)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Line badge box placeholder
+        Box(
+            modifier = GlanceModifier
+                .size(width = 30.dp, height = 18.dp)
+                .background(skeletonColor)
+                .cornerRadius(4.dp)
+        ) {}
+
+        Spacer(modifier = GlanceModifier.width(8.dp))
+
+        // Terminus destination bar placeholder
+        Box(
+            modifier = GlanceModifier
+                .defaultWeight()
+                .height(14.dp)
+                .background(skeletonColor)
+                .cornerRadius(4.dp)
+        ) {}
+
+        Spacer(modifier = GlanceModifier.width(12.dp))
+
+        // Countdown pill placeholder
+        Box(
+            modifier = GlanceModifier
+                .size(width = 38.dp, height = 18.dp)
+                .background(skeletonColor)
+                .cornerRadius(6.dp)
+        ) {}
     }
 }

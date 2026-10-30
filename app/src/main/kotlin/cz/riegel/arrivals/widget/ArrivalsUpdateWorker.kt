@@ -169,32 +169,12 @@ class ArrivalsUpdateWorker(
         userCoords: Coordinates?,
         fallbackErrorMessage: String?
     ) {
-        val cached = cacheRepository.getLastResponse()
-        if (cached != null) {
-            val (cachedResponse, cachedTime) = cached
-            val stops = normalizer.normalize(cachedResponse, referenceTime = now)
-            val warningBanner = CacheResilience.formatCachedWarning(cachedTime)
-
-            val updatedState = engine.reduce(
-                WidgetStateManager.getState(appContext),
-                ArrivalsAction.UpdateData(
-                    stops = stops,
-                    userCoordinates = userCoords,
-                    cachedWarning = warningBanner
-                )
-            )
-            val finalState = if (updatedState is ArrivalsViewState.Content) {
-                updatedState.copy(isRefreshing = false)
-            } else {
-                updatedState
-            }
-            WidgetStateManager.setState(appContext, finalState)
-            WidgetStateManager.updateAllWidgets(appContext)
-        } else {
-            val msg = fallbackErrorMessage ?: "Unable to fetch transit departures"
-            WidgetStateManager.setState(appContext, ArrivalsViewState.Error(msg, canRetry = true))
-            WidgetStateManager.updateAllWidgets(appContext)
-        }
+        restoreCachedDepartures(
+            context = appContext,
+            now = now,
+            userCoords = userCoords,
+            fallbackErrorMessage = fallbackErrorMessage
+        )
     }
 
     @SuppressLint("MissingPermission")
@@ -292,23 +272,83 @@ class ArrivalsUpdateWorker(
     }
 
     companion object {
-        private const val WORK_NAME_PERIODIC = "arrivals_periodic_update"
-        private const val WORK_NAME_ONE_TIME = "arrivals_one_time_update"
+        const val WORK_NAME_PERIODIC = "arrivals_periodic_update"
+        const val WORK_NAME_ONE_TIME = "arrivals_one_time_update"
+
+        suspend fun restoreCachedDepartures(
+            context: Context,
+            now: Instant = Instant.now(),
+            userCoords: Coordinates? = null,
+            fallbackErrorMessage: String? = null
+        ) {
+            val cacheRepository = DeparturesCacheRepository(context)
+            val normalizer = DepartureNormalizer()
+            val engine = ArrivalsEngine()
+            val cached = cacheRepository.getLastResponse()
+            val current = WidgetStateManager.getState(context)
+            val targetStop = (current as? ArrivalsViewState.Content)?.activeStop
+
+            if (cached != null) {
+                val (cachedResponse, cachedTime) = cached
+                val stops = normalizer.normalize(cachedResponse, referenceTime = now)
+                val matchedStop = if (targetStop != null) {
+                    stops.find { it.id == targetStop.id || it.name == targetStop.name }
+                } else {
+                    stops.firstOrNull()
+                }
+
+                val hasCachedDeparturesForStop = matchedStop != null &&
+                    matchedStop.platforms.any { it.departures.isNotEmpty() }
+
+                if (hasCachedDeparturesForStop) {
+                    val warningBanner = CacheResilience.formatCachedWarning(cachedTime)
+                    val updatedState = engine.reduce(
+                        current,
+                        ArrivalsAction.UpdateData(
+                            stops = stops,
+                            userCoordinates = userCoords,
+                            cachedWarning = warningBanner
+                        )
+                    )
+                    val finalState = if (updatedState is ArrivalsViewState.Content) {
+                        updatedState.copy(isRefreshing = false, isLoadingDepartures = false)
+                    } else {
+                        updatedState
+                    }
+                    WidgetStateManager.setState(context, finalState)
+                    WidgetStateManager.updateAllWidgets(context)
+                    return
+                }
+            }
+
+            val stopName = targetStop?.name
+            val msg = if (stopName != null) {
+                "Unable to fetch departures for $stopName. Check connection."
+            } else {
+                fallbackErrorMessage ?: "Unable to fetch transit departures"
+            }
+            WidgetStateManager.setState(context, ArrivalsViewState.Error(msg, canRetry = true))
+            WidgetStateManager.updateAllWidgets(context)
+        }
 
         fun enqueueOneTimeWork(context: Context) {
-            val request = OneTimeWorkRequestBuilder<ArrivalsUpdateWorker>()
-                .setConstraints(
-                    Constraints.Builder()
-                        .setRequiredNetworkType(NetworkType.CONNECTED)
-                        .build()
-                )
-                .build()
+            try {
+                val request = OneTimeWorkRequestBuilder<ArrivalsUpdateWorker>()
+                    .setConstraints(
+                        Constraints.Builder()
+                            .setRequiredNetworkType(NetworkType.CONNECTED)
+                            .build()
+                    )
+                    .build()
 
-            WorkManager.getInstance(context).enqueueUniqueWork(
-                WORK_NAME_ONE_TIME,
-                ExistingWorkPolicy.REPLACE,
-                request
-            )
+                WorkManager.getInstance(context).enqueueUniqueWork(
+                    WORK_NAME_ONE_TIME,
+                    ExistingWorkPolicy.REPLACE,
+                    request
+                )
+            } catch (e: Exception) {
+                // Ignore in environments without WorkManager initialization
+            }
         }
 
         fun schedulePeriodicWork(context: Context, intervalMinutes: Long = 15) {

@@ -73,12 +73,15 @@ class ArrivalsEngine {
                 if (action.stopIndex !in state.stops.indices) {
                     return state.copy(pickerMode = PickerMode.Departures)
                 }
+                val isDifferentStop = action.stopIndex != state.activeStopIndex
                 val selectedStop = state.stops[action.stopIndex]
                 val defaultPlatform = resolveDefaultPlatformCode(selectedStop, state.userCoordinates)
                 state.copy(
                     activeStopIndex = action.stopIndex,
                     activePlatformCode = defaultPlatform,
-                    pickerMode = PickerMode.Departures
+                    pickerMode = PickerMode.Departures,
+                    isLoadingDepartures = if (isDifferentStop) true else state.isLoadingDepartures,
+                    isRefreshing = if (isDifferentStop) true else state.isRefreshing
                 )
             }
             is ArrivalsAction.SelectPlatform -> {
