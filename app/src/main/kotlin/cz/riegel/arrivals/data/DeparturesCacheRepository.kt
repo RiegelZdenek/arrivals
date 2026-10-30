@@ -60,10 +60,11 @@ class DeparturesCacheRepository(context: Context) {
         )
     }
 
-    fun saveActiveSelection(stopIndex: Int, platformCode: String) {
+    fun saveActiveSelection(stopIndex: Int, platformCode: String, pickerMode: String = "Departures") {
         prefs.edit()
             .putInt(KEY_ACTIVE_STOP_INDEX, stopIndex)
             .putString(KEY_ACTIVE_PLATFORM_CODE, platformCode)
+            .putString(KEY_ACTIVE_PICKER_MODE, pickerMode)
             .apply()
     }
 
@@ -75,6 +76,10 @@ class DeparturesCacheRepository(context: Context) {
         return prefs.getString(KEY_ACTIVE_PLATFORM_CODE, null)
     }
 
+    fun getActivePickerMode(): String? {
+        return prefs.getString(KEY_ACTIVE_PICKER_MODE, null)
+    }
+
     companion object {
         private const val PREFS_CACHE_NAME = "arrivals_cache_prefs"
         private const val KEY_CACHED_PAYLOAD = "cached_payload"
@@ -84,5 +89,6 @@ class DeparturesCacheRepository(context: Context) {
         private const val KEY_COORDS_TIME = "coords_time"
         private const val KEY_ACTIVE_STOP_INDEX = "active_stop_index"
         private const val KEY_ACTIVE_PLATFORM_CODE = "active_platform_code"
+        private const val KEY_ACTIVE_PICKER_MODE = "active_picker_mode"
     }
 }

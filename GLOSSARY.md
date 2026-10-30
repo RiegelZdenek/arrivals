@@ -13,7 +13,7 @@ A specific physical boarding pole, track, or quay within a Stop, designated by a
 _Avoid_: Pole, Označník, Post, Bay
 
 **Departure**:
-A scheduled or real-time transit vehicle leaving a Platform toward a given Headsign.
+A scheduled or real-time transit vehicle leaving a Platform toward a given Terminus.
 _Avoid_: Arrival, Trip
 
 **Delay**:
@@ -24,9 +24,9 @@ _Avoid_: Tardiness, Latency
 The public transit route identifier (e.g., Tram 22, Metro A, Bus 119).
 _Avoid_: Route, Service
 
-**Headsign**:
+**Terminus**:
 The final destination text displayed on the vehicle indicating its travel direction.
-_Avoid_: Destination, Direction, Terminus
+_Avoid_: Headsign, Destination, Direction
 
 **Transport Mode**:
 The category of transit vehicle serving a platform, primarily Metro, Tram, Bus, and Trolleybus.

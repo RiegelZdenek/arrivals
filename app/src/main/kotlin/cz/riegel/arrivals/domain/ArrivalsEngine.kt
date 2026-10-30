@@ -46,27 +46,47 @@ class ArrivalsEngine {
         }
     }
 
+    private fun resolveDefaultPlatformCode(
+        stop: Stop,
+        userCoords: Coordinates?
+    ): String {
+        return findClosestPlatform(stop, userCoords)?.code
+            ?: stop.platforms.firstOrNull()?.code.orEmpty()
+    }
+
     fun reduce(state: ArrivalsViewState, action: ArrivalsAction): ArrivalsViewState {
         return when (action) {
-            is ArrivalsAction.NextStop -> {
-                if (state !is ArrivalsViewState.Content || state.stops.isEmpty()) return state
-                val nextIndex = (state.activeStopIndex + 1) % state.stops.size
-                val nextStop = state.stops[nextIndex]
-                val closestPlatform = findClosestPlatform(nextStop, state.userCoordinates)
-                val defaultPlatform = closestPlatform?.code ?: nextStop.platforms.firstOrNull()?.code.orEmpty()
-                state.copy(activeStopIndex = nextIndex, activePlatformCode = defaultPlatform)
+            is ArrivalsAction.OpenStopPicker -> {
+                if (state !is ArrivalsViewState.Content || !state.hasMultipleStops) return state
+                state.copy(pickerMode = PickerMode.StopPicker)
             }
-            is ArrivalsAction.PreviousStop -> {
+            is ArrivalsAction.OpenPlatformPicker -> {
+                if (state !is ArrivalsViewState.Content || !state.hasMultiplePlatforms) return state
+                state.copy(pickerMode = PickerMode.PlatformPicker)
+            }
+            is ArrivalsAction.ClosePicker -> {
+                if (state !is ArrivalsViewState.Content) return state
+                state.copy(pickerMode = PickerMode.Departures)
+            }
+            is ArrivalsAction.SelectStop -> {
                 if (state !is ArrivalsViewState.Content || state.stops.isEmpty()) return state
-                val prevIndex = if (state.activeStopIndex - 1 < 0) state.stops.size - 1 else state.activeStopIndex - 1
-                val prevStop = state.stops[prevIndex]
-                val closestPlatform = findClosestPlatform(prevStop, state.userCoordinates)
-                val defaultPlatform = closestPlatform?.code ?: prevStop.platforms.firstOrNull()?.code.orEmpty()
-                state.copy(activeStopIndex = prevIndex, activePlatformCode = defaultPlatform)
+                if (action.stopIndex !in state.stops.indices) {
+                    return state.copy(pickerMode = PickerMode.Departures)
+                }
+                val selectedStop = state.stops[action.stopIndex]
+                val defaultPlatform = resolveDefaultPlatformCode(selectedStop, state.userCoordinates)
+                state.copy(
+                    activeStopIndex = action.stopIndex,
+                    activePlatformCode = defaultPlatform,
+                    pickerMode = PickerMode.Departures
+                )
             }
             is ArrivalsAction.SelectPlatform -> {
                 if (state !is ArrivalsViewState.Content) return state
-                state.copy(activePlatformCode = action.code)
+                state.copy(
+                    activePlatformCode = action.code,
+                    pickerMode = PickerMode.Departures
+                )
             }
             is ArrivalsAction.UpdateData -> {
                 if (action.stops.isEmpty()) {
@@ -77,12 +97,46 @@ class ArrivalsEngine {
                 } else {
                     action.stops
                 }
+
+                if (state is ArrivalsViewState.Content && state.stops.isNotEmpty()) {
+                    val previousStop = state.activeStop
+                    val matchedStopIndex = rankedStops.indexOfFirst {
+                        it.id == previousStop.id || it.name == previousStop.name
+                    }
+                    val resolvedStopIndex = if (matchedStopIndex >= 0) matchedStopIndex else 0
+                    val resolvedStop = rankedStops[resolvedStopIndex]
+                    val resolvedPlatformCode = if (
+                        matchedStopIndex >= 0 &&
+                        resolvedStop.platforms.any { it.code == state.activePlatformCode }
+                    ) {
+                        state.activePlatformCode
+                    } else {
+                        resolveDefaultPlatformCode(resolvedStop, action.userCoordinates)
+                    }
+                    val resolvedPickerMode = when (state.pickerMode) {
+                        PickerMode.StopPicker -> {
+                            if (rankedStops.size > 1) PickerMode.StopPicker else PickerMode.Departures
+                        }
+                        PickerMode.PlatformPicker -> {
+                            if (resolvedStop.platforms.size > 1) PickerMode.PlatformPicker else PickerMode.Departures
+                        }
+                        PickerMode.Departures -> PickerMode.Departures
+                    }
+                    return ArrivalsViewState.Content(
+                        stops = rankedStops,
+                        activeStopIndex = resolvedStopIndex,
+                        activePlatformCode = resolvedPlatformCode,
+                        userCoordinates = action.userCoordinates,
+                        cachedWarning = action.cachedWarning,
+                        pickerMode = resolvedPickerMode
+                    )
+                }
+
                 val primaryStop = rankedStops.first()
-                val closestPlatform = findClosestPlatform(primaryStop, action.userCoordinates)
                 ArrivalsViewState.Content(
                     stops = rankedStops,
                     activeStopIndex = 0,
-                    activePlatformCode = closestPlatform?.code ?: primaryStop.platforms.firstOrNull()?.code.orEmpty(),
+                    activePlatformCode = resolveDefaultPlatformCode(primaryStop, action.userCoordinates),
                     userCoordinates = action.userCoordinates,
                     cachedWarning = action.cachedWarning
                 )

@@ -1,6 +1,8 @@
 package cz.riegel.arrivals.widget
 
+import androidx.compose.ui.unit.dp
 import cz.riegel.arrivals.domain.ArrivalsViewState
+import cz.riegel.arrivals.domain.model.Coordinates
 import cz.riegel.arrivals.domain.model.CountdownDisplay
 import cz.riegel.arrivals.domain.model.Delay
 import cz.riegel.arrivals.domain.model.Departure
@@ -9,7 +11,8 @@ import cz.riegel.arrivals.domain.model.Platform
 import cz.riegel.arrivals.domain.model.Stop
 import cz.riegel.arrivals.domain.model.TransportMode
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
@@ -18,11 +21,11 @@ class ArrivalsWidgetContentTest {
 
     @Test
     fun widgetState_computesDisplayDeparturesForCompactAndStandard() {
-        val departures = (1..6).map { i ->
+        val departures = (1..8).map { i ->
             Departure(
                 id = "dep_$i",
                 line = Line("$i", TransportMode.Tram),
-                headsign = "Headsign $i",
+                headsign = "Terminus $i",
                 scheduledTime = Instant.now(),
                 predictedTime = Instant.now(),
                 countdown = CountdownDisplay(i.toLong(), "$i min", false),
@@ -42,15 +45,126 @@ class ArrivalsWidgetContentTest {
         assertEquals("I. P. Pavlova", state.activeStop.name)
         assertEquals(15, state.activeStop.distanceMeters)
         assertEquals("A", state.activePlatform?.code)
-        assertEquals(6, state.activeDepartures.size)
+        assertEquals(8, state.activeDepartures.size)
 
-        // Compact limits to 3 departures
-        val compactList = state.activeDepartures.take(3)
-        assertEquals(3, compactList.size)
+        // Compact (< 180dp) limits to 4 departures
+        assertEquals(4, maxDeparturesForHeight(110.dp))
+        val compactList = state.visibleDepartures(isCompact = true)
+        assertEquals(4, compactList.size)
+        assertEquals(listOf("1", "2", "3", "4"), compactList.map { it.line.name })
 
-        // Standard shows up to 6 departures
-        val standardList = state.activeDepartures.take(6)
-        assertEquals(6, standardList.size)
+        // Standard/large (>= 180dp) shows up to 7 departures
+        assertEquals(7, maxDeparturesForHeight(180.dp))
+        assertEquals(7, maxDeparturesForHeight(250.dp))
+        val standardList = state.visibleDepartures(isCompact = false)
+        assertEquals(7, standardList.size)
+        assertEquals(listOf("1", "2", "3", "4", "5", "6", "7"), standardList.map { it.line.name })
+    }
+
+    @Test
+    fun headerPlatformPill_visibilityAndDropdownIndicatorRules() {
+        // 1. Multiple platforms with physical codes -> shown with dropdown indicator and clickable
+        val multiPlatformStop = Stop(
+            id = "s1",
+            name = "I. P. Pavlova",
+            platforms = listOf(
+                Platform("p1", "A"),
+                Platform("p2", "B")
+            )
+        )
+        val multiState = ArrivalsViewState.Content(
+            stops = listOf(multiPlatformStop),
+            activeStopIndex = 0,
+            activePlatformCode = "A"
+        )
+        assertTrue(multiState.hasMultiplePlatforms)
+        assertTrue(multiState.showHeaderPlatformPill)
+        assertEquals("A ▾", multiState.headerPlatformPillText)
+
+        // 2. Multiple platforms with Terminus fallback codes -> shown with dropdown indicator and clickable
+        val multiFallbackStop = Stop(
+            id = "s2",
+            name = "Lipanská",
+            platforms = listOf(
+                Platform("p1", "→ Bílá Hora"),
+                Platform("p2", "→ Spojovací")
+            )
+        )
+        val multiFallbackState = ArrivalsViewState.Content(
+            stops = listOf(multiFallbackStop),
+            activeStopIndex = 0,
+            activePlatformCode = "→ Bílá Hora"
+        )
+        assertTrue(multiFallbackState.hasMultiplePlatforms)
+        assertTrue(multiFallbackState.showHeaderPlatformPill)
+        assertEquals("→ Bílá Hora ▾", multiFallbackState.headerPlatformPillText)
+
+        // 3. Single platform with physical code -> shown statically without dropdown indicator
+        val singlePhysicalStop = Stop(
+            id = "s3",
+            name = "Muzeum",
+            platforms = listOf(Platform("p1", "A"))
+        )
+        val singlePhysicalState = ArrivalsViewState.Content(
+            stops = listOf(singlePhysicalStop),
+            activeStopIndex = 0,
+            activePlatformCode = "A"
+        )
+        assertFalse(singlePhysicalState.hasMultiplePlatforms)
+        assertTrue(singlePhysicalState.showHeaderPlatformPill)
+        assertEquals("A", singlePhysicalState.headerPlatformPillText)
+
+        // 4. Single platform with Terminus fallback code -> hidden
+        val singleFallbackStop = Stop(
+            id = "s4",
+            name = "Krymská",
+            platforms = listOf(Platform("p1", "→ Bílá Hora"))
+        )
+        val singleFallbackState = ArrivalsViewState.Content(
+            stops = listOf(singleFallbackStop),
+            activeStopIndex = 0,
+            activePlatformCode = "→ Bílá Hora"
+        )
+        assertFalse(singleFallbackState.hasMultiplePlatforms)
+        assertFalse(singleFallbackState.showHeaderPlatformPill)
+        assertNull(singleFallbackState.headerPlatformPillText)
+    }
+
+    @Test
+    fun activeNavigationCoordinates_usesActivePlatformOrFallsBackToStop() {
+        val stopWithPlatformCoords = Stop(
+            id = "s1",
+            name = "I. P. Pavlova",
+            lat = 50.0750,
+            lon = 14.4300,
+            platforms = listOf(
+                Platform("p1", "A", lat = 50.0755, lon = 14.4305),
+                Platform("p2", "B", lat = 0.0, lon = 0.0)
+            )
+        )
+        val stateOnA = ArrivalsViewState.Content(
+            stops = listOf(stopWithPlatformCoords),
+            activeStopIndex = 0,
+            activePlatformCode = "A"
+        )
+        assertEquals(Coordinates(50.0755, 14.4305), stateOnA.activeNavigationCoordinates)
+
+        val stateOnB = stateOnA.copy(activePlatformCode = "B")
+        assertEquals(Coordinates(50.0750, 14.4300), stateOnB.activeNavigationCoordinates)
+    }
+
+    @Test
+    fun headerStopName_showsDropdownIndicatorOnlyWhenMultipleStops() {
+        val stop1 = Stop("s1", "I. P. Pavlova", platforms = listOf(Platform("p1", "A")))
+        val stop2 = Stop("s2", "Muzeum", platforms = listOf(Platform("p2", "B")))
+
+        val singleStopState = ArrivalsViewState.Content(stops = listOf(stop1))
+        assertFalse(singleStopState.hasMultipleStops)
+        assertEquals("I. P. Pavlova", singleStopState.headerStopNameText)
+
+        val multiStopState = ArrivalsViewState.Content(stops = listOf(stop1, stop2))
+        assertTrue(multiStopState.hasMultipleStops)
+        assertEquals("I. P. Pavlova ▾", multiStopState.headerStopNameText)
     }
 
     @Test

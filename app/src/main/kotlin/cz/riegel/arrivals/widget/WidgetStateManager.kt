@@ -9,6 +9,7 @@ import cz.riegel.arrivals.domain.ArrivalsAction
 import cz.riegel.arrivals.domain.ArrivalsEngine
 import cz.riegel.arrivals.domain.ArrivalsViewState
 import cz.riegel.arrivals.domain.DepartureNormalizer
+import cz.riegel.arrivals.domain.PickerMode
 import cz.riegel.arrivals.domain.model.Coordinates
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -79,7 +80,19 @@ object WidgetStateManager {
                     engine.findClosestPlatform(savedStop, cachedCoords)?.code
                         ?: savedStop.platforms.firstOrNull()?.code.orEmpty()
                 }
-                reduced.copy(activeStopIndex = savedStopIdx, activePlatformCode = validPlatform)
+                val savedPickerMode = cacheRepo.getActivePickerMode()
+                    ?.let { runCatching { PickerMode.valueOf(it) }.getOrNull() }
+                    ?: PickerMode.Departures
+                val validPickerMode = when (savedPickerMode) {
+                    PickerMode.StopPicker -> if (reduced.stops.size > 1) PickerMode.StopPicker else PickerMode.Departures
+                    PickerMode.PlatformPicker -> if (savedStop.platforms.size > 1) PickerMode.PlatformPicker else PickerMode.Departures
+                    PickerMode.Departures -> PickerMode.Departures
+                }
+                reduced.copy(
+                    activeStopIndex = savedStopIdx,
+                    activePlatformCode = validPlatform,
+                    pickerMode = validPickerMode
+                )
             } else {
                 null
             }
@@ -94,7 +107,8 @@ object WidgetStateManager {
             try {
                 DeparturesCacheRepository(context).saveActiveSelection(
                     newState.activeStopIndex,
-                    newState.activePlatformCode
+                    newState.activePlatformCode,
+                    newState.pickerMode.name
                 )
             } catch (e: Exception) {
                 // Ignore in non-Android test environments if needed
@@ -102,26 +116,27 @@ object WidgetStateManager {
         }
     }
 
-    suspend fun onNextStop(context: Context) {
+    private suspend fun dispatch(context: Context, action: ArrivalsAction) {
         val current = getState(context)
-        val next = engine.reduce(current, ArrivalsAction.NextStop)
+        val next = engine.reduce(current, action)
         setState(context, next)
         updateAllWidgets(context)
     }
 
-    suspend fun onPrevStop(context: Context) {
-        val current = getState(context)
-        val prev = engine.reduce(current, ArrivalsAction.PreviousStop)
-        setState(context, prev)
-        updateAllWidgets(context)
-    }
+    suspend fun onOpenStopPicker(context: Context) =
+        dispatch(context, ArrivalsAction.OpenStopPicker)
 
-    suspend fun onSelectPlatform(context: Context, platformCode: String) {
-        val current = getState(context)
-        val selected = engine.reduce(current, ArrivalsAction.SelectPlatform(platformCode))
-        setState(context, selected)
-        updateAllWidgets(context)
-    }
+    suspend fun onOpenPlatformPicker(context: Context) =
+        dispatch(context, ArrivalsAction.OpenPlatformPicker)
+
+    suspend fun onClosePicker(context: Context) =
+        dispatch(context, ArrivalsAction.ClosePicker)
+
+    suspend fun onSelectStop(context: Context, stopIndex: Int) =
+        dispatch(context, ArrivalsAction.SelectStop(stopIndex))
+
+    suspend fun onSelectPlatform(context: Context, platformCode: String) =
+        dispatch(context, ArrivalsAction.SelectPlatform(platformCode))
 
     suspend fun onRefresh(context: Context) {
         val current = getState(context)

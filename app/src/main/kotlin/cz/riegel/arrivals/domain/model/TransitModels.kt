@@ -7,11 +7,11 @@ data class Coordinates(
     val lon: Double
 )
 
-enum class TransportMode {
-    Metro,
-    Tram,
-    Bus,
-    Trolleybus
+enum class TransportMode(val symbol: String) {
+    Metro("Ⓜ"),
+    Tram("🚊"),
+    Bus("🚌"),
+    Trolleybus("🚎")
 }
 
 data class Line(
@@ -45,16 +45,34 @@ data class Departure(
     val countdown: CountdownDisplay,
     val delay: Delay,
     val isWheelchairAccessible: Boolean = false
-)
+) {
+    val terminus: String
+        get() = headsign
+}
 
 data class Platform(
     val id: String,
-    val code: String, // e.g., "A", "B", or headsign fallback "→ Centrum"
+    val code: String, // e.g., "A", "B", or Terminus fallback "→ Centrum"
     val lat: Double = 0.0,
     val lon: Double = 0.0,
     val departures: List<Departure> = emptyList(),
     val distanceMeters: Int? = null
-)
+) {
+    val distinctTransportModes: List<TransportMode>
+        get() = departures.map { it.line.transportMode }.distinct().sorted()
+
+    val transportModeSymbols: List<String>
+        get() = distinctTransportModes.map { it.symbol }
+
+    val distinctTerminuses: List<String>
+        get() = departures
+            .map { it.terminus.removePrefix("→").trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
+
+    val terminusSummary: String?
+        get() = distinctTerminuses.takeIf { it.isNotEmpty() }?.joinToString(", ")
+}
 
 data class Stop(
     val id: String,
@@ -63,4 +81,14 @@ data class Stop(
     val lon: Double = 0.0,
     val distanceMeters: Int? = null,
     val platforms: List<Platform> = emptyList()
-)
+) {
+    val distinctTransportModes: List<TransportMode>
+        get() = platforms
+            .flatMap { it.departures }
+            .map { it.line.transportMode }
+            .distinct()
+            .sorted()
+
+    val transportModeSymbols: List<String>
+        get() = distinctTransportModes.map { it.symbol }
+}
