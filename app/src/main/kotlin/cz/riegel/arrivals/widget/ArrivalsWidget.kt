@@ -679,9 +679,9 @@ fun DepartureRowItem(departure: Departure) {
         )
         Spacer(modifier = GlanceModifier.width(8.dp))
 
-        // Headsign
+        // Terminus
         Text(
-            text = departure.headsign,
+            text = departure.terminus,
             style = TextStyle(color = androidx.glance.unit.ColorProvider(Color(0xFFE0E0E0)), fontSize = 13.sp)
         )
 
@@ -738,7 +738,7 @@ fun DepartureSkeletonRowItem() {
 
         Spacer(modifier = GlanceModifier.width(8.dp))
 
-        // Terminus destination bar placeholder
+        // Terminus bar placeholder
         Box(
             modifier = GlanceModifier
                 .defaultWeight()

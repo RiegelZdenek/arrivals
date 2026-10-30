@@ -80,18 +80,10 @@ object WidgetStateManager {
                     engine.findClosestPlatform(savedStop, cachedCoords)?.code
                         ?: savedStop.platforms.firstOrNull()?.code.orEmpty()
                 }
-                val savedPickerMode = cacheRepo.getActivePickerMode()
-                    ?.let { runCatching { PickerMode.valueOf(it) }.getOrNull() }
-                    ?: PickerMode.Departures
-                val validPickerMode = when (savedPickerMode) {
-                    PickerMode.StopPicker -> if (reduced.stops.size > 1) PickerMode.StopPicker else PickerMode.Departures
-                    PickerMode.PlatformPicker -> if (savedStop.platforms.size > 1) PickerMode.PlatformPicker else PickerMode.Departures
-                    PickerMode.Departures -> PickerMode.Departures
-                }
                 reduced.copy(
                     activeStopIndex = savedStopIdx,
                     activePlatformCode = validPlatform,
-                    pickerMode = validPickerMode
+                    pickerMode = PickerMode.Departures
                 )
             } else {
                 null

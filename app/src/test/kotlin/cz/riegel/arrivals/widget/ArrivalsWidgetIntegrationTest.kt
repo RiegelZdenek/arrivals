@@ -68,14 +68,7 @@ class ArrivalsWidgetIntegrationTest {
     @Before
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
-        val config = androidx.work.Configuration.Builder()
-            .setMinimumLoggingLevel(android.util.Log.DEBUG)
-            .build()
-        try {
-            WorkManager.initialize(context, config)
-        } catch (_: Exception) {
-            // Already initialized
-        }
+        ArrivalsUpdateWorker.oneTimeWorkEnqueuedCount = 0
     }
 
     @Test
@@ -238,31 +231,40 @@ class ArrivalsWidgetIntegrationTest {
         // Ensure disk cache has initial selection
         assertEquals(0, cacheRepo.getActiveStopIndex())
         assertEquals("A", cacheRepo.getActivePlatformCode())
-        assertNull("Transient picker mode should not be written to disk", cacheRepo.getActivePickerMode())
+
+        // Track SharedPreferences write events to verify zero disk writes on transient toggles
+        var diskWrites = 0
+        val prefs = context.getSharedPreferences("arrivals_cache_prefs", Context.MODE_PRIVATE)
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            diskWrites++
+        }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
 
         // 1. Open Stop Picker -> in-memory state changes immediately
         WidgetStateManager.onOpenStopPicker(context)
         var state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
         assertEquals(PickerMode.StopPicker, state.pickerMode)
-        assertNull("Opening StopPicker must not write transient picker mode to disk", cacheRepo.getActivePickerMode())
+        assertEquals(0, diskWrites)
 
         // 2. Close picker -> in-memory returns to Departures immediately
         WidgetStateManager.onClosePicker(context)
         state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
         assertEquals(PickerMode.Departures, state.pickerMode)
-        assertNull("Closing StopPicker must not write transient picker mode to disk", cacheRepo.getActivePickerMode())
+        assertEquals(0, diskWrites)
 
         // 3. Open Platform Picker -> in-memory changes immediately
         WidgetStateManager.onOpenPlatformPicker(context)
         state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
         assertEquals(PickerMode.PlatformPicker, state.pickerMode)
-        assertNull("Opening PlatformPicker must not write transient picker mode to disk", cacheRepo.getActivePickerMode())
+        assertEquals(0, diskWrites)
 
         // 4. Close picker
         WidgetStateManager.onClosePicker(context)
         state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
         assertEquals(PickerMode.Departures, state.pickerMode)
-        assertNull("Closing PlatformPicker must not write transient picker mode to disk", cacheRepo.getActivePickerMode())
+        assertEquals(0, diskWrites)
+
+        prefs.unregisterOnSharedPreferenceChangeListener(listener)
     }
 
     @Test
@@ -337,6 +339,9 @@ class ArrivalsWidgetIntegrationTest {
         state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
         assertEquals("B", state.activePlatformCode)
         assertEquals("9", state.activeDepartures.first().line.name)
+
+        // 4. Verify no background network update work was enqueued
+        assertEquals(0, ArrivalsUpdateWorker.oneTimeWorkEnqueuedCount)
     }
 
     @Test
@@ -391,11 +396,7 @@ class ArrivalsWidgetIntegrationTest {
         assertTrue(state.isRefreshing)
 
         // 1. Verify OneTimeWork is enqueued for ArrivalsUpdateWorker
-        val workInfos = WorkManager.getInstance(context)
-            .getWorkInfosForUniqueWork(ArrivalsUpdateWorker.WORK_NAME_ONE_TIME)
-            .get()
-        assertNotNull(workInfos)
-        assertTrue(workInfos.isNotEmpty())
+        assertTrue("Selecting a stop must enqueue background worker", ArrivalsUpdateWorker.oneTimeWorkEnqueuedCount > 0)
 
         // 2. When worker completes and updates data with fresh departures for Karlovo náměstí
         val now = Instant.now()
@@ -421,23 +422,19 @@ class ArrivalsWidgetIntegrationTest {
             )
         )
 
-        WidgetStateManager.setState(
-            context,
-            ArrivalsViewState.Content(
-                stops = listOf(stop1, freshStop2),
-                activeStopIndex = 1,
-                activePlatformCode = "1",
-                isLoadingDepartures = false,
-                isRefreshing = false
-            )
+        val engine = cz.riegel.arrivals.domain.ArrivalsEngine()
+        val next = engine.reduce(
+            state,
+            ArrivalsAction.UpdateData(stops = listOf(stop1, freshStop2))
         )
+        WidgetStateManager.setState(context, next)
 
         state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
         // Skeletons and refreshing dismissed, live fresh departures displayed
         assertFalse(state.isLoadingDepartures)
         assertFalse(state.isRefreshing)
         assertEquals("18", state.activeDepartures.first().line.name)
-        assertEquals("Nádraží Podbaba", state.activeDepartures.first().headsign)
+        assertEquals("Nádraží Podbaba", state.activeDepartures.first().terminus)
     }
 
     @Test

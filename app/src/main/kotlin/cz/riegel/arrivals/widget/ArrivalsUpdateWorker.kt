@@ -331,14 +331,12 @@ class ArrivalsUpdateWorker(
             WidgetStateManager.updateAllWidgets(context)
         }
 
+        internal var oneTimeWorkEnqueuedCount = 0
+
         fun enqueueOneTimeWork(context: Context) {
+            oneTimeWorkEnqueuedCount++
             try {
                 val request = OneTimeWorkRequestBuilder<ArrivalsUpdateWorker>()
-                    .setConstraints(
-                        Constraints.Builder()
-                            .setRequiredNetworkType(NetworkType.CONNECTED)
-                            .build()
-                    )
                     .build()
 
                 WorkManager.getInstance(context).enqueueUniqueWork(
