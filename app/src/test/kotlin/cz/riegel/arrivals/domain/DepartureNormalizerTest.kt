@@ -132,9 +132,19 @@ class DepartureNormalizerTest {
     @Test
     fun normalize_resolvesTransportModesCorrectly() {
         assertEquals(TransportMode.Metro, normalizer.resolveTransportMode(1))
+        assertEquals(TransportMode.Train, normalizer.resolveTransportMode(2))
         assertEquals(TransportMode.Tram, normalizer.resolveTransportMode(0))
         assertEquals(TransportMode.Bus, normalizer.resolveTransportMode(3))
         assertEquals(TransportMode.Trolleybus, normalizer.resolveTransportMode(11))
+    }
+
+    @Test
+    fun transportMode_definesCorrectLetterSymbols() {
+        assertEquals("M", TransportMode.Metro.symbol)
+        assertEquals("T", TransportMode.Tram.symbol)
+        assertEquals("B", TransportMode.Bus.symbol)
+        assertEquals("R", TransportMode.Trolleybus.symbol)
+        assertEquals("V", TransportMode.Train.symbol)
     }
 
     @Test

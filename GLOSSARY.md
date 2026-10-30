@@ -29,5 +29,5 @@ The final destination text displayed on the vehicle indicating its travel direct
 _Avoid_: Headsign, Destination, Direction
 
 **Transport Mode**:
-The category of transit vehicle serving a platform, primarily Metro, Tram, Bus, and Trolleybus.
+The category of transit vehicle serving a platform, primarily Metro, Tram, Bus, Trolleybus, and Train.
 _Avoid_: Vehicle Type, Category

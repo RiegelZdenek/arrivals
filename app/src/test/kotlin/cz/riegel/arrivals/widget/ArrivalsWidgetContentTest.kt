@@ -188,4 +188,34 @@ class ArrivalsWidgetContentTest {
         assertEquals(4, skeletonRowCountForHeight(250.dp))
         assertEquals(4, skeletonRowCountForHeight(340.dp))
     }
+
+    @Test
+    fun transportModeSymbols_formatsCorrectlyForPickersIncludingTrain() {
+        val departures = listOf(
+            Departure(
+                id = "d1",
+                line = Line("S7", TransportMode.Train),
+                headsign = "Beroun",
+                scheduledTime = Instant.now(),
+                predictedTime = Instant.now(),
+                countdown = CountdownDisplay(5, "5 min", false),
+                delay = Delay(0, false)
+            ),
+            Departure(
+                id = "d2",
+                line = Line("22", TransportMode.Tram),
+                headsign = "Bílá Hora",
+                scheduledTime = Instant.now(),
+                predictedTime = Instant.now(),
+                countdown = CountdownDisplay(10, "10 min", false),
+                delay = Delay(0, false)
+            )
+        )
+        val platform = Platform("p1", "1", departures = departures)
+        val stop = Stop("s1", "Praha hl.n.", platforms = listOf(platform))
+
+        assertEquals(listOf("T", "V"), platform.transportModeSymbols)
+        assertEquals(listOf("T", "V"), stop.transportModeSymbols)
+        assertEquals("T V", platform.transportModeSymbols.joinToString(" "))
+    }
 }

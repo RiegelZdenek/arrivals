@@ -213,13 +213,13 @@ class ArrivalsEngineTest {
 
         assertEquals("I. P. Pavlova", rows[0].name)
         assertEquals(listOf(TransportMode.Metro, TransportMode.Tram, TransportMode.Bus), rows[0].transportModes)
-        assertEquals(listOf("Ⓜ", "🚊", "🚌"), rows[0].transportModeSymbols)
+        assertEquals(listOf("M", "T", "B"), rows[0].transportModeSymbols)
         assertEquals(25, rows[0].distanceMeters)
         assertTrue("First stop should be marked selected", rows[0].isSelected)
 
         assertEquals("Bruselská", rows[1].name)
         assertEquals(listOf(TransportMode.Tram), rows[1].transportModes)
-        assertEquals(listOf("🚊"), rows[1].transportModeSymbols)
+        assertEquals(listOf("T"), rows[1].transportModeSymbols)
         assertEquals(180, rows[1].distanceMeters)
         assertTrue("Second stop should not be marked selected", !rows[1].isSelected)
     }
@@ -361,7 +361,7 @@ class ArrivalsEngineTest {
         // Row 0: Platform A -> Tram & Bus, distinct Terminus names "Bílá Hora, Vypich", distance 12m, selected
         assertEquals("A", rows[0].code)
         assertEquals(listOf(TransportMode.Tram, TransportMode.Bus), rows[0].transportModes)
-        assertEquals(listOf("🚊", "🚌"), rows[0].transportModeSymbols)
+        assertEquals(listOf("T", "B"), rows[0].transportModeSymbols)
         assertEquals(listOf("Bílá Hora", "Vypich"), rows[0].distinctTerminuses)
         assertEquals("Bílá Hora, Vypich", rows[0].terminusSummary)
         assertEquals("Bílá Hora, Vypich", rows[0].displayTerminusText("Žádné nadcházející odjezdy"))
@@ -370,7 +370,7 @@ class ArrivalsEngineTest {
 
         // Row 1: Terminus fallback platform "→ Spojovací" -> avoids duplicate "→" and deduplicates
         assertEquals("→ Spojovací", rows[1].code)
-        assertEquals(listOf("🚊"), rows[1].transportModeSymbols)
+        assertEquals(listOf("T"), rows[1].transportModeSymbols)
         assertEquals(listOf("Spojovací"), rows[1].distinctTerminuses)
         assertEquals("Spojovací", rows[1].terminusSummary)
         assertEquals(35, rows[1].distanceMeters)

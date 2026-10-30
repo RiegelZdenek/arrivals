@@ -535,7 +535,7 @@ fun StopPickerList(state: ArrivalsViewState.Content) {
                         Text(
                             text = row.transportModeSymbols.joinToString(" "),
                             style = TextStyle(
-                                color = androidx.glance.unit.ColorProvider(Color.LightGray),
+                                color = androidx.glance.unit.ColorProvider(Color(0xFFB0B0C0)),
                                 fontSize = 12.sp
                             ),
                             maxLines = 1
@@ -601,7 +601,7 @@ fun PlatformPickerList(state: ArrivalsViewState.Content) {
                         Text(
                             text = row.transportModeSymbols.joinToString(" "),
                             style = TextStyle(
-                                color = androidx.glance.unit.ColorProvider(Color.LightGray),
+                                color = androidx.glance.unit.ColorProvider(Color(0xFFB0B0C0)),
                                 fontSize = 12.sp
                             ),
                             maxLines = 1
@@ -662,10 +662,19 @@ fun DepartureRowItem(departure: Departure) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         // Mode symbol
-        Text(
-            text = modeSymbol,
-            style = TextStyle(color = androidx.glance.unit.ColorProvider(Color.LightGray), fontSize = 13.sp)
-        )
+        Box(
+            modifier = GlanceModifier.width(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = modeSymbol,
+                style = TextStyle(
+                    color = androidx.glance.unit.ColorProvider(Color.LightGray),
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.sp
+                )
+            )
+        }
         Spacer(modifier = GlanceModifier.width(6.dp))
 
         // Line number

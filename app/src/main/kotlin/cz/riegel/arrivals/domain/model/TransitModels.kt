@@ -8,10 +8,11 @@ data class Coordinates(
 )
 
 enum class TransportMode(val symbol: String) {
-    Metro("Ⓜ"),
-    Tram("🚊"),
-    Bus("🚌"),
-    Trolleybus("🚎")
+    Metro("M"),
+    Tram("T"),
+    Bus("B"),
+    Trolleybus("R"),
+    Train("V")
 }
 
 data class Line(

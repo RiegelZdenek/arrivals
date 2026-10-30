@@ -188,6 +188,7 @@ class DepartureNormalizer(
         return when (type) {
             0 -> TransportMode.Tram
             1 -> TransportMode.Metro
+            2 -> TransportMode.Train
             3 -> TransportMode.Bus
             11 -> TransportMode.Trolleybus
             else -> TransportMode.Bus
