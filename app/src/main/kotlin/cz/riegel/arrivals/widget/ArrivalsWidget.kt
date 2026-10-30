@@ -308,29 +308,6 @@ fun ArrivalsWidgetContent(state: ArrivalsViewState) {
             }
             is ArrivalsViewState.Content -> {
                 Column(modifier = GlanceModifier.fillMaxSize()) {
-                    // Refreshing banner if update is currently in progress
-                    if (state.isRefreshing) {
-                        Row(
-                            modifier = GlanceModifier
-                                .fillMaxWidth()
-                                .background(Color(0x3381B0FF))
-                                .cornerRadius(6.dp)
-                                .padding(horizontal = 8.dp, vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = GlanceModifier.size(12.dp),
-                                color = androidx.glance.unit.ColorProvider(Color(0xFF81B0FF))
-                            )
-                            Spacer(modifier = GlanceModifier.width(6.dp))
-                            Text(
-                                text = "Aktualizace odjezdů…",
-                                style = TextStyle(color = androidx.glance.unit.ColorProvider(Color(0xFF81B0FF)), fontSize = 11.sp)
-                            )
-                        }
-                        Spacer(modifier = GlanceModifier.height(4.dp))
-                    }
-
                     // Cached warning banner if present (Spec 14)
                     if (!state.cachedWarning.isNullOrBlank()) {
                         Row(
