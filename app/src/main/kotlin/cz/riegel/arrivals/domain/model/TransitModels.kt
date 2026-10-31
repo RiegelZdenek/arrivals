@@ -55,16 +55,13 @@ data class CountdownDisplay(
 data class Departure(
     val id: String,
     val line: Line,
-    val headsign: String,
+    val terminus: String,
     val scheduledTime: Instant,
     val predictedTime: Instant,
     val countdown: CountdownDisplay,
     val delay: Delay,
     val isWheelchairAccessible: Boolean = false
-) {
-    val terminus: String
-        get() = headsign
-}
+)
 
 data class Platform(
     val id: String,

@@ -52,7 +52,7 @@ class ArrivalsWidgetIntegrationTest {
                     Departure(
                         id = "dep_1",
                         line = Line("22", TransportMode.Tram),
-                        headsign = "Bílá Hora",
+                        terminus = "Bílá Hora",
                         scheduledTime = Instant.now(),
                         predictedTime = Instant.now(),
                         countdown = CountdownDisplay(3, "3 min", false),
@@ -144,7 +144,7 @@ class ArrivalsWidgetIntegrationTest {
                         Departure(
                             id = "d1",
                             line = Line("22", TransportMode.Tram),
-                            headsign = "Bílá Hora",
+                            terminus = "Bílá Hora",
                             scheduledTime = baseTime.plusSeconds(300),
                             predictedTime = baseTime.plusSeconds(300),
                             countdown = CountdownDisplay(5, "5 min", false),
@@ -165,7 +165,7 @@ class ArrivalsWidgetIntegrationTest {
                         Departure(
                             id = "d2",
                             line = Line("10", TransportMode.Tram),
-                            headsign = "Sídliště Řepy",
+                            terminus = "Sídliště Řepy",
                             scheduledTime = baseTime.plusSeconds(420),
                             predictedTime = baseTime.plusSeconds(420),
                             countdown = CountdownDisplay(7, "7 min", false),
@@ -180,7 +180,7 @@ class ArrivalsWidgetIntegrationTest {
                         Departure(
                             id = "d3",
                             line = Line("16", TransportMode.Tram),
-                            headsign = "Kotlářka",
+                            terminus = "Kotlářka",
                             scheduledTime = baseTime.plusSeconds(240),
                             predictedTime = baseTime.plusSeconds(240),
                             countdown = CountdownDisplay(4, "4 min", false),
@@ -275,7 +275,7 @@ class ArrivalsWidgetIntegrationTest {
                 Departure(
                     id = "dep_22",
                     line = Line("22", TransportMode.Tram),
-                    headsign = "Bílá Hora",
+                    terminus = "Bílá Hora",
                     scheduledTime = now.plusSeconds(300),
                     predictedTime = now.plusSeconds(300),
                     countdown = CountdownDisplay(5, "5 min", false),
@@ -290,7 +290,7 @@ class ArrivalsWidgetIntegrationTest {
                 Departure(
                     id = "dep_9",
                     line = Line("9", TransportMode.Tram),
-                    headsign = "Sídliště Řepy",
+                    terminus = "Sídliště Řepy",
                     scheduledTime = now.plusSeconds(600),
                     predictedTime = now.plusSeconds(600),
                     countdown = CountdownDisplay(10, "10 min", false),

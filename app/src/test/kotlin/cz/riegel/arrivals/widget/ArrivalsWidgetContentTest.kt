@@ -26,7 +26,7 @@ class ArrivalsWidgetContentTest {
             Departure(
                 id = "dep_$i",
                 line = Line("$i", TransportMode.Tram),
-                headsign = "Terminus $i",
+                terminus = "Terminus $i",
                 scheduledTime = Instant.now(),
                 predictedTime = Instant.now(),
                 countdown = CountdownDisplay(i.toLong(), "$i min", false),
@@ -237,7 +237,7 @@ class ArrivalsWidgetContentTest {
             Departure(
                 id = "d1",
                 line = Line("S7", TransportMode.Train),
-                headsign = "Beroun",
+                terminus = "Beroun",
                 scheduledTime = Instant.now(),
                 predictedTime = Instant.now(),
                 countdown = CountdownDisplay(5, "5 min", false),
@@ -246,7 +246,7 @@ class ArrivalsWidgetContentTest {
             Departure(
                 id = "d2",
                 line = Line("22", TransportMode.Tram),
-                headsign = "Bílá Hora",
+                terminus = "Bílá Hora",
                 scheduledTime = Instant.now(),
                 predictedTime = Instant.now(),
                 countdown = CountdownDisplay(10, "10 min", false),

@@ -18,9 +18,16 @@ class GolemioApiClient(
     private val baseUrl: String = "https://api.golemio.cz/v2/pid/departureboards",
     private val apiKeyProvider: () -> String?,
     private val okHttpClient: OkHttpClient = defaultOkHttpClient(),
-    private val stopsStreamProvider: (() -> InputStream)? = null,
-    private val stopRegistry: StopRegistry = StopRegistry(stopsStreamProvider)
+    private val stopsStreamProvider: (() -> InputStream)? = null
 ) : TransitDataSource {
+
+    private val stopRegistry = StopRegistry(stopsStreamProvider)
+
+    fun findClosestStopDistance(coordinates: Coordinates): Pair<String, Int>? {
+        return stopRegistry.findClosestStop(coordinates.lat, coordinates.lon)?.let { (stop, dist) ->
+            stop.n to dist
+        }
+    }
 
     private val json = Json {
         ignoreUnknownKeys = true
@@ -136,6 +143,10 @@ class GolemioApiClient(
                 okHttpClient = okHttpClient,
                 stopsStreamProvider = { appContext.assets.open("stops_compact.json") }
             )
+        }
+
+        fun isWithinPragueCoverage(coordinates: Coordinates): Boolean {
+            return StopRegistry.isWithinPragueCoverage(coordinates.lat, coordinates.lon)
         }
 
         fun defaultOkHttpClient(): OkHttpClient {

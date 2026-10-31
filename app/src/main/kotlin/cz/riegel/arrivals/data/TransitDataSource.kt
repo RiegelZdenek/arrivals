@@ -73,5 +73,3 @@ class FakeTransitDataSource(
         return defaultResult
     }
 }
-
-typealias InMemoryTransitDataSource = FakeTransitDataSource

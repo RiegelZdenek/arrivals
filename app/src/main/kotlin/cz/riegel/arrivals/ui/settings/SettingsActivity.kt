@@ -24,8 +24,8 @@ import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import cz.riegel.arrivals.R
 import cz.riegel.arrivals.data.DeparturesRepository
+import cz.riegel.arrivals.data.GolemioApiClient
 import cz.riegel.arrivals.data.SettingsRepository
-import cz.riegel.arrivals.data.StopRegistry
 import cz.riegel.arrivals.domain.model.Coordinates
 import cz.riegel.arrivals.widget.ArrivalsUpdateWorker
 import kotlinx.coroutines.launch
@@ -36,7 +36,7 @@ import java.time.Instant
 class SettingsActivity : AppCompatActivity() {
 
     private lateinit var settingsRepository: SettingsRepository
-    private lateinit var stopRegistry: StopRegistry
+    private lateinit var golemioClient: GolemioApiClient
 
     private lateinit var editApiKey: EditText
     private lateinit var editRadius: EditText
@@ -73,7 +73,7 @@ class SettingsActivity : AppCompatActivity() {
         setContentView(R.layout.activity_settings)
 
         settingsRepository = SettingsRepository(this)
-        stopRegistry = StopRegistry.create(this)
+        golemioClient = GolemioApiClient.create(this, apiKeyProvider = { settingsRepository.getApiKey() })
 
         editApiKey = findViewById(R.id.editApiKey)
         editRadius = findViewById(R.id.editRadius)
@@ -183,23 +183,24 @@ class SettingsActivity : AppCompatActivity() {
                     val lon = location.longitude
                     val accuracy = if (location.hasAccuracy()) "±${location.accuracy.toInt()} m" else "neznámá"
 
+                    val coords = Coordinates(lat = lat, lon = lon)
                     // Persist this fresh foreground fix immediately so the background widget worker has it
                     DeparturesRepository.create(this@SettingsActivity).saveLocation(
-                        Coordinates(lat = lat, lon = lon),
+                        coords,
                         Instant.now()
                     )
                     if (settingsRepository.isConfigured()) {
                         ArrivalsUpdateWorker.enqueueOneTimeWork(this@SettingsActivity)
                     }
 
-                    if (!StopRegistry.isWithinPragueCoverage(lat, lon)) {
+                    if (!GolemioApiClient.isWithinPragueCoverage(coords)) {
                         textLocationStatus.text = "⚠ Poloha: %.4f, %.4f (Přesnost: %s)\nPoloha je mimo oblast Prahy PID. Pokud používáte emulátor, nastavte GPS na Prahu nebo zvolte simulovanou zastávku níže."
                             .format(lat, lon, accuracy)
                     } else {
-                        val closest = stopRegistry.findClosestStop(lat, lon)
+                        val closest = golemioClient.findClosestStopDistance(coords)
                         if (closest != null) {
                             textLocationStatus.text = "✓ GPS poloha: %.4f, %.4f (Přesnost: %s)\nNejbližší zastávka: %s (%d m od vás)"
-                                .format(lat, lon, accuracy, closest.first.n, closest.second)
+                                .format(lat, lon, accuracy, closest.first, closest.second)
                         } else {
                             textLocationStatus.text = "✓ GPS poloha: %.4f, %.4f (Přesnost: %s)\nV okolí nebyla nalezena zastávka."
                                 .format(lat, lon, accuracy)

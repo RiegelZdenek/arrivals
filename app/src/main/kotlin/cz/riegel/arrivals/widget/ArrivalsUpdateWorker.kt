@@ -55,7 +55,7 @@ class ArrivalsUpdateWorker(
             WidgetStateManager.updateAllWidgets(appContext)
         }
 
-        val transitDataSource = transitDataSourceFactory(appContext) { apiKey }
+        val transitDataSource = TransitDataSource.create(appContext) { apiKey }
         val now = Instant.now()
 
         // 1. Resolve coordinates (High-Accuracy GPS or 30-min underground fallback per ADR-0003)
@@ -217,9 +217,6 @@ class ArrivalsUpdateWorker(
         const val WORK_NAME_PERIODIC = "arrivals_periodic_update"
         const val WORK_NAME_ONE_TIME = "arrivals_one_time_update"
 
-        internal var transitDataSourceFactory: (Context, () -> String?) -> TransitDataSource =
-            { context, apiKeyProvider -> GolemioApiClient.create(context, apiKeyProvider) }
-
         suspend fun fetchWithAdaptiveRadius(
             transitDataSource: TransitDataSource,
             userCoordinates: Coordinates,
@@ -264,11 +261,11 @@ class ArrivalsUpdateWorker(
             now: Instant = Instant.now(),
             userCoords: Coordinates? = null,
             fallbackErrorMessage: String? = null,
-            repository: DeparturesRepository = WidgetStateManager.repositoryProvider(context)
+            repository: DeparturesRepository = DeparturesRepository.create(context)
         ) {
             val engine = ArrivalsEngine()
             val cached = repository.getCachedDepartures()
-            val current = WidgetStateManager.getState(context)
+            val current = WidgetStateManager.getState(context, now, repository)
             val targetStop = (current as? ArrivalsViewState.Content)?.activeStop
 
             if (cached != null && (cached.response.stops.isNotEmpty() || cached.response.departures.isNotEmpty())) {
@@ -292,7 +289,7 @@ class ArrivalsUpdateWorker(
                         matchedStop.platforms.any { it.departures.isNotEmpty() }
 
                     if (hasCachedDeparturesForStop) {
-                        WidgetStateManager.setState(context, updatedState)
+                        WidgetStateManager.setState(context, updatedState, repository)
                         WidgetStateManager.updateAllWidgets(context)
                         return
                     }
@@ -305,7 +302,7 @@ class ArrivalsUpdateWorker(
             } else {
                 fallbackErrorMessage ?: "Unable to fetch transit departures"
             }
-            WidgetStateManager.setState(context, ArrivalsViewState.Error(msg, canRetry = true))
+            WidgetStateManager.setState(context, ArrivalsViewState.Error(msg, canRetry = true), repository)
             WidgetStateManager.updateAllWidgets(context)
         }
 

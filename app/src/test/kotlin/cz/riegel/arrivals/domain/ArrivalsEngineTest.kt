@@ -31,10 +31,10 @@ class ArrivalsEngineTest {
     private val userCoords = Coordinates(lat = 50.0755, lon = 14.4302)
     private val now = Instant.parse("2026-10-23T14:30:00Z")
 
-    private fun sampleDeparture(headsign: String) = Departure(
+    private fun sampleDeparture(terminus: String) = Departure(
         id = "dep_1",
         line = Line("22", TransportMode.Tram),
-        headsign = headsign,
+        terminus = terminus,
         scheduledTime = Instant.now(),
         predictedTime = Instant.now(),
         countdown = CountdownDisplay(2, "2 min", false),
@@ -160,7 +160,7 @@ class ArrivalsEngineTest {
         val depMetro = Departure(
             id = "d1",
             line = Line("C", TransportMode.Metro),
-            headsign = "Háje",
+            terminus = "Háje",
             scheduledTime = Instant.now(),
             predictedTime = Instant.now(),
             countdown = CountdownDisplay(1, "1 min", false),
@@ -169,7 +169,7 @@ class ArrivalsEngineTest {
         val depTram1 = Departure(
             id = "d2",
             line = Line("22", TransportMode.Tram),
-            headsign = "Bílá Hora",
+            terminus = "Bílá Hora",
             scheduledTime = Instant.now(),
             predictedTime = Instant.now(),
             countdown = CountdownDisplay(2, "2 min", false),
@@ -178,7 +178,7 @@ class ArrivalsEngineTest {
         val depTram2 = Departure(
             id = "d3",
             line = Line("10", TransportMode.Tram),
-            headsign = "Sídliště Řepy",
+            terminus = "Sídliště Řepy",
             scheduledTime = Instant.now(),
             predictedTime = Instant.now(),
             countdown = CountdownDisplay(4, "4 min", false),
@@ -187,7 +187,7 @@ class ArrivalsEngineTest {
         val depBus = Departure(
             id = "d4",
             line = Line("135", TransportMode.Bus),
-            headsign = "Florenc",
+            terminus = "Florenc",
             scheduledTime = Instant.now(),
             predictedTime = Instant.now(),
             countdown = CountdownDisplay(5, "5 min", false),
@@ -292,7 +292,7 @@ class ArrivalsEngineTest {
         val depTramBilaHora = Departure(
             id = "d1",
             line = Line("22", TransportMode.Tram),
-            headsign = "Bílá Hora",
+            terminus = "Bílá Hora",
             scheduledTime = Instant.now(),
             predictedTime = Instant.now(),
             countdown = CountdownDisplay(2, "2 min", false),
@@ -301,7 +301,7 @@ class ArrivalsEngineTest {
         val depTramVypich = Departure(
             id = "d2",
             line = Line("25", TransportMode.Tram),
-            headsign = "Vypich",
+            terminus = "Vypich",
             scheduledTime = Instant.now(),
             predictedTime = Instant.now(),
             countdown = CountdownDisplay(4, "4 min", false),
@@ -310,7 +310,7 @@ class ArrivalsEngineTest {
         val depBusBilaHoraDuplicate = Departure(
             id = "d3",
             line = Line("135", TransportMode.Bus),
-            headsign = "Bílá Hora",
+            terminus = "Bílá Hora",
             scheduledTime = Instant.now(),
             predictedTime = Instant.now(),
             countdown = CountdownDisplay(5, "5 min", false),
@@ -319,7 +319,7 @@ class ArrivalsEngineTest {
         val depFallbackArrowTerminus = Departure(
             id = "d4",
             line = Line("9", TransportMode.Tram),
-            headsign = "→ Spojovací",
+            terminus = "→ Spojovací",
             scheduledTime = Instant.now(),
             predictedTime = Instant.now(),
             countdown = CountdownDisplay(3, "3 min", false),
@@ -328,7 +328,7 @@ class ArrivalsEngineTest {
         val depPlainSpojovaci = Departure(
             id = "d5",
             line = Line("5", TransportMode.Tram),
-            headsign = "Spojovací",
+            terminus = "Spojovací",
             scheduledTime = Instant.now(),
             predictedTime = Instant.now(),
             countdown = CountdownDisplay(6, "6 min", false),
@@ -578,7 +578,7 @@ class ArrivalsEngineTest {
         val dep = platformA.departures[0]
         assertEquals("22", dep.line.name)
         assertEquals(TransportMode.Tram, dep.line.transportMode)
-        assertEquals("Bílá Hora", dep.headsign)
+        assertEquals("Bílá Hora", dep.terminus)
         assertEquals(5, dep.countdown.minutesRemaining)
         assertEquals("5 min", dep.countdown.displayText)
         assertFalse(dep.countdown.isClockTime)
@@ -717,7 +717,7 @@ class ArrivalsEngineTest {
         assertEquals("Chodov", state.stops[0].name)
         assertEquals(1, state.stops[0].platforms.size)
         assertEquals(1, state.stops[0].platforms[0].departures.size)
-        assertEquals("Letňany", state.stops[0].platforms[0].departures[0].headsign)
+        assertEquals("Letňany", state.stops[0].platforms[0].departures[0].terminus)
     }
 
     @Test
@@ -798,7 +798,7 @@ class ArrivalsEngineTest {
 
         val remaining = ticked.stops[0].platforms[0].departures
         assertEquals(1, remaining.size)
-        assertEquals("Later", remaining[0].headsign)
+        assertEquals("Later", remaining[0].terminus)
         assertEquals(2, remaining[0].countdown.minutesRemaining)
         assertEquals("2 min", remaining[0].countdown.displayText)
     }

@@ -15,10 +15,6 @@ import java.time.Instant
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import kotlin.math.atan2
-import kotlin.math.cos
-import kotlin.math.sin
-import kotlin.math.sqrt
 
 class ArrivalsEngine(
     private val zoneId: ZoneId = ZoneId.of("Europe/Prague")
@@ -241,7 +237,7 @@ class ArrivalsEngine(
                 val normalizedDepartures = platformDepartures.mapNotNull { depDto ->
                     normalizeDeparture(depDto, referenceTime)
                 }.filter { dep ->
-                    Duration.between(referenceTime, dep.predictedTime).seconds >= -30
+                    isNotExpired(dep, referenceTime)
                 }.sortedBy { it.predictedTime }
 
                 Platform(
@@ -300,7 +296,7 @@ class ArrivalsEngine(
                 name = depDto.route.shortName,
                 transportMode = transportMode
             ),
-            headsign = depDto.trip.headsign,
+            terminus = depDto.trip.headsign,
             scheduledTime = scheduledInstant,
             predictedTime = predictedInstant,
             countdown = countdown,
@@ -346,12 +342,16 @@ class ArrivalsEngine(
         return stops.map { stop ->
             val updatedPlatforms = stop.platforms.map { platform ->
                 val updatedDepartures = platform.departures
-                    .filter { dep -> Duration.between(referenceTime, dep.predictedTime).seconds >= -30 }
+                    .filter { dep -> isNotExpired(dep, referenceTime) }
                     .map { dep -> dep.copy(countdown = computeCountdown(dep.predictedTime, referenceTime)) }
                 platform.copy(departures = updatedDepartures)
             }
             stop.copy(platforms = updatedPlatforms)
         }
+    }
+
+    private fun isNotExpired(dep: Departure, referenceTime: Instant): Boolean {
+        return Duration.between(referenceTime, dep.predictedTime).seconds >= -30
     }
 
     private fun resolveTransportMode(type: Int): TransportMode {
@@ -386,14 +386,5 @@ class ArrivalsEngine(
     fun calculateDistanceMeters(
         from: Coordinates,
         to: Coordinates
-    ): Int {
-        val earthRadius = 6371000.0 // meters
-        val dLat = Math.toRadians(to.lat - from.lat)
-        val dLon = Math.toRadians(to.lon - from.lon)
-        val a = sin(dLat / 2) * sin(dLat / 2) +
-                cos(Math.toRadians(from.lat)) * cos(Math.toRadians(to.lat)) *
-                sin(dLon / 2) * sin(dLon / 2)
-        val c = 2 * atan2(sqrt(a), sqrt(1 - a))
-        return (earthRadius * c).toInt()
-    }
+    ): Int = from.distanceTo(to)
 }

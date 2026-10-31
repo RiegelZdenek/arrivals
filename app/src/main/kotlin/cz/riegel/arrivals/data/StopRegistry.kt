@@ -1,19 +1,18 @@
 package cz.riegel.arrivals.data
 
-import android.content.Context
 import cz.riegel.arrivals.domain.model.Coordinates
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.io.InputStream
 
 @Serializable
-data class CompactStop(
+internal data class CompactStop(
     val n: String,
     val lat: Double,
     val lon: Double
 )
 
-class StopRegistry(
+internal class StopRegistry(
     private val stopsStreamProvider: (() -> InputStream)? = null
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -61,13 +60,6 @@ class StopRegistry(
     }
 
     companion object {
-        fun create(context: Context): StopRegistry {
-            val appContext = context.applicationContext ?: context
-            return StopRegistry(
-                stopsStreamProvider = { appContext.assets.open("stops_compact.json") }
-            )
-        }
-
         fun isWithinPragueCoverage(lat: Double, lon: Double): Boolean {
             return lat in 49.70..50.50 && lon in 14.00..15.00
         }

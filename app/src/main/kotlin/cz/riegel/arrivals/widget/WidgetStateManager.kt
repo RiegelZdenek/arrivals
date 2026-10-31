@@ -19,13 +19,16 @@ object WidgetStateManager {
     val stateFlow = _stateFlow.asStateFlow()
     private val GLANCE_STATE_VERSION_KEY = longPreferencesKey("glance_state_version")
     private var versionCounter = 0L
-    internal var repositoryProvider: (Context) -> DeparturesRepository = { DeparturesRepository.create(it) }
 
-    fun getState(context: Context, referenceTime: Instant = Instant.now()): ArrivalsViewState {
+    fun getState(
+        context: Context,
+        referenceTime: Instant = Instant.now(),
+        repository: DeparturesRepository = DeparturesRepository.create(context)
+    ): ArrivalsViewState {
         WidgetCountdownTicker.ensureRegistered(context)
         val current = _stateFlow.value
         if (current is ArrivalsViewState.Loading) {
-            val rehydrated = rehydrateFromCache(context, referenceTime)
+            val rehydrated = rehydrateFromCache(referenceTime, repository)
             if (rehydrated != null) {
                 _stateFlow.value = rehydrated
                 return rehydrated
@@ -38,19 +41,22 @@ object WidgetStateManager {
         return current
     }
 
-    suspend fun tickCountdowns(context: Context, referenceTime: Instant = Instant.now()) {
-        val state = getState(context, referenceTime)
+    suspend fun tickCountdowns(
+        context: Context,
+        referenceTime: Instant = Instant.now(),
+        repository: DeparturesRepository = DeparturesRepository.create(context)
+    ) {
+        val state = getState(context, referenceTime, repository)
         if (state is ArrivalsViewState.Content) {
             updateAllWidgets(context)
         }
     }
 
     private fun rehydrateFromCache(
-        context: Context,
-        referenceTime: Instant = Instant.now()
+        referenceTime: Instant = Instant.now(),
+        repository: DeparturesRepository
     ): ArrivalsViewState.Content? {
         return try {
-            val repository = repositoryProvider(context)
             val cached = repository.getCachedDepartures() ?: return null
 
             val reduced = engine.reduce(
@@ -85,7 +91,11 @@ object WidgetStateManager {
         }
     }
 
-    fun setState(context: Context, newState: ArrivalsViewState) {
+    fun setState(
+        context: Context,
+        newState: ArrivalsViewState,
+        repository: DeparturesRepository = DeparturesRepository.create(context)
+    ) {
         val previousState = _stateFlow.value
         _stateFlow.value = newState
         if (newState is ArrivalsViewState.Content) {
@@ -95,7 +105,7 @@ object WidgetStateManager {
 
             if (!isTransientPickerToggle) {
                 try {
-                    repositoryProvider(context).saveActiveSelection(
+                    repository.saveActiveSelection(
                         newState.activeStopIndex,
                         newState.activePlatformCode
                     )
@@ -106,38 +116,58 @@ object WidgetStateManager {
         }
     }
 
-    private suspend fun dispatch(context: Context, action: ArrivalsAction) {
-        val current = getState(context)
+    private suspend fun dispatch(
+        context: Context,
+        action: ArrivalsAction,
+        repository: DeparturesRepository = DeparturesRepository.create(context)
+    ) {
+        val current = getState(context, repository = repository)
         val next = engine.reduce(current, action)
-        setState(context, next)
+        setState(context, next, repository)
         updateAllWidgets(context)
     }
 
-    suspend fun onOpenStopPicker(context: Context) =
-        dispatch(context, ArrivalsAction.OpenStopPicker)
+    suspend fun onOpenStopPicker(
+        context: Context,
+        repository: DeparturesRepository = DeparturesRepository.create(context)
+    ) = dispatch(context, ArrivalsAction.OpenStopPicker, repository)
 
-    suspend fun onOpenPlatformPicker(context: Context) =
-        dispatch(context, ArrivalsAction.OpenPlatformPicker)
+    suspend fun onOpenPlatformPicker(
+        context: Context,
+        repository: DeparturesRepository = DeparturesRepository.create(context)
+    ) = dispatch(context, ArrivalsAction.OpenPlatformPicker, repository)
 
-    suspend fun onClosePicker(context: Context) =
-        dispatch(context, ArrivalsAction.ClosePicker)
+    suspend fun onClosePicker(
+        context: Context,
+        repository: DeparturesRepository = DeparturesRepository.create(context)
+    ) = dispatch(context, ArrivalsAction.ClosePicker, repository)
 
-    suspend fun onSelectStop(context: Context, stopIndex: Int) {
-        val current = getState(context)
+    suspend fun onSelectStop(
+        context: Context,
+        stopIndex: Int,
+        repository: DeparturesRepository = DeparturesRepository.create(context)
+    ) {
+        val current = getState(context, repository = repository)
         val isDifferentStop = current is ArrivalsViewState.Content && current.activeStopIndex != stopIndex
-        dispatch(context, ArrivalsAction.SelectStop(stopIndex))
+        dispatch(context, ArrivalsAction.SelectStop(stopIndex), repository)
         if (isDifferentStop) {
             ArrivalsUpdateWorker.enqueueOneTimeWork(context)
         }
     }
 
-    suspend fun onSelectPlatform(context: Context, platformCode: String) =
-        dispatch(context, ArrivalsAction.SelectPlatform(platformCode))
+    suspend fun onSelectPlatform(
+        context: Context,
+        platformCode: String,
+        repository: DeparturesRepository = DeparturesRepository.create(context)
+    ) = dispatch(context, ArrivalsAction.SelectPlatform(platformCode), repository)
 
-    suspend fun onRefresh(context: Context) {
-        val current = getState(context)
+    suspend fun onRefresh(
+        context: Context,
+        repository: DeparturesRepository = DeparturesRepository.create(context)
+    ) {
+        val current = getState(context, repository = repository)
         val next = engine.reduce(current, ArrivalsAction.Refresh)
-        setState(context, next)
+        setState(context, next, repository)
         updateAllWidgets(context)
 
         ArrivalsUpdateWorker.enqueueOneTimeWork(context)

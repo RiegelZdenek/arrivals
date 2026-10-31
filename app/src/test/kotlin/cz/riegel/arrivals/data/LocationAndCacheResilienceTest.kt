@@ -38,7 +38,6 @@ class LocationAndCacheResilienceTest {
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         context.getSharedPreferences("arrivals_cache_prefs", Context.MODE_PRIVATE).edit().clear().commit()
-        WidgetStateManager.repositoryProvider = { DeparturesRepository.create(it) }
     }
 
     private fun adaptersUnderTest(): List<DeparturesRepository> {
@@ -162,7 +161,6 @@ class LocationAndCacheResilienceTest {
     @Test
     fun restoreCachedDepartures_unitTest_fallbackBehaviorAndWarning() = runBlocking {
         val repository = InMemoryDeparturesRepository()
-        WidgetStateManager.repositoryProvider = { repository }
         val now = Instant.parse("2026-10-23T13:43:00Z")
         val fetchTime = Instant.parse("2026-10-23T13:42:00Z")
 
@@ -193,7 +191,8 @@ class LocationAndCacheResilienceTest {
                 activePlatformCode = "A",
                 isLoadingDepartures = true,
                 isRefreshing = true
-            )
+            ),
+            repository = repository
         )
 
         ArrivalsUpdateWorker.restoreCachedDepartures(
@@ -203,7 +202,7 @@ class LocationAndCacheResilienceTest {
             repository = repository
         )
 
-        val restored = WidgetStateManager.getState(context, now) as ArrivalsViewState.Content
+        val restored = WidgetStateManager.getState(context, now, repository = repository) as ArrivalsViewState.Content
         assertFalse(restored.isLoadingDepartures)
         assertFalse(restored.isRefreshing)
         assertEquals("Cached 15:42 • Tap to retry", restored.cachedWarning)

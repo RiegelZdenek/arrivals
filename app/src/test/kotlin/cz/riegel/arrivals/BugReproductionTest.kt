@@ -4,9 +4,11 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import cz.riegel.arrivals.data.DeparturesRepository
 import cz.riegel.arrivals.data.FakeTransitDataSource
+import cz.riegel.arrivals.data.GolemioApiClient
 import cz.riegel.arrivals.data.InMemoryDeparturesRepository
 import cz.riegel.arrivals.data.LocationResolution
-import cz.riegel.arrivals.data.StopRegistry
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import cz.riegel.arrivals.data.model.GolemioDepartureBoardResponse
 import cz.riegel.arrivals.data.model.GolemioDepartureDto
 import cz.riegel.arrivals.data.model.GolemioDepartureStopDto
@@ -35,17 +37,31 @@ import java.time.Instant
 class BugReproductionTest {
 
     @Test
-    fun bug1_stopRegistry_lipanskaHasCorrectUtf8Encoding() {
+    fun bug1_stopRegistry_lipanskaHasCorrectUtf8Encoding() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val registry = StopRegistry.create(context)
+        val server = MockWebServer()
+        server.start()
+        try {
+            server.enqueue(MockResponse().setResponseCode(200).setBody("""{"stops":[],"departures":[]}"""))
+            val client = GolemioApiClient.create(
+                context = context,
+                apiKeyProvider = { "test-key" },
+                baseUrl = server.url("/v2/pid/departureboards").toString()
+            )
 
-        // Coordinates right at Lipanská (50.08396, 14.45343)
-        val closest = registry.findClosestStop(50.08396, 14.45343)
-        assertNotNull(closest)
-        assertEquals("Lipanská", closest!!.first.n)
+            // Coordinates right at Lipanská (50.08396, 14.45343)
+            val lipanskaCoords = Coordinates(50.08396, 14.45343)
+            val closest = client.findClosestStopDistance(lipanskaCoords)
+            assertNotNull(closest)
+            assertEquals("Lipanská", closest!!.first)
 
-        val nearby = registry.findNearbyStopNames(50.08396, 14.45343, 300)
-        assertEquals("Lipanská", nearby.first())
+            client.fetchNearbyDepartures(lipanskaCoords, radiusMeters = 300)
+            val request = server.takeRequest()
+            val names = request.requestUrl!!.queryParameterValues("names")
+            assertEquals("Lipanská", names.first())
+        } finally {
+            server.shutdown()
+        }
     }
 
     @Test
