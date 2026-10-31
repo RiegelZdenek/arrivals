@@ -4,12 +4,11 @@ import android.content.Context
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.state.updateAppWidgetState
-import cz.riegel.arrivals.data.DeparturesCacheRepository
+import cz.riegel.arrivals.data.DeparturesRepository
 import cz.riegel.arrivals.domain.ArrivalsAction
 import cz.riegel.arrivals.domain.ArrivalsEngine
 import cz.riegel.arrivals.domain.ArrivalsViewState
 import cz.riegel.arrivals.domain.PickerMode
-import cz.riegel.arrivals.domain.model.Coordinates
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.time.Instant
@@ -20,6 +19,7 @@ object WidgetStateManager {
     val stateFlow = _stateFlow.asStateFlow()
     private val GLANCE_STATE_VERSION_KEY = longPreferencesKey("glance_state_version")
     private var versionCounter = 0L
+    internal var repositoryProvider: (Context) -> DeparturesRepository = { DeparturesRepository.create(it) }
 
     fun getState(context: Context, referenceTime: Instant = Instant.now()): ArrivalsViewState {
         WidgetCountdownTicker.ensureRegistered(context)
@@ -50,30 +50,26 @@ object WidgetStateManager {
         referenceTime: Instant = Instant.now()
     ): ArrivalsViewState.Content? {
         return try {
-            val cacheRepo = DeparturesCacheRepository(context)
-            val cached = cacheRepo.getLastResponse() ?: return null
-            val (dto, _) = cached
+            val repository = repositoryProvider(context)
+            val cached = repository.getCachedDepartures() ?: return null
 
-            val cachedCoords = cacheRepo.getLastCoordinates()?.let {
-                Coordinates(it.lat, it.lon)
-            }
             val reduced = engine.reduce(
                 ArrivalsViewState.Loading(),
                 ArrivalsAction.IngestApiResponse(
-                    response = dto,
-                    userCoordinates = cachedCoords,
+                    response = cached.response,
+                    userCoordinates = cached.coordinates,
                     referenceTime = referenceTime,
                     cachedWarning = null
                 )
             )
             if (reduced is ArrivalsViewState.Content) {
-                val savedStopIdx = cacheRepo.getActiveStopIndex().coerceIn(0, (reduced.stops.size - 1).coerceAtLeast(0))
+                val savedStopIdx = repository.getActiveStopIndex().coerceIn(0, (reduced.stops.size - 1).coerceAtLeast(0))
                 val savedStop = reduced.stops[savedStopIdx]
-                val savedPlatform = cacheRepo.getActivePlatformCode()
+                val savedPlatform = repository.getActivePlatformCode()
                 val validPlatform = if (savedPlatform != null && savedStop.platforms.any { it.code == savedPlatform }) {
                     savedPlatform
                 } else {
-                    engine.findClosestPlatform(savedStop, cachedCoords)?.code
+                    engine.findClosestPlatform(savedStop, cached.coordinates)?.code
                         ?: savedStop.platforms.firstOrNull()?.code.orEmpty()
                 }
                 reduced.copy(
@@ -99,7 +95,7 @@ object WidgetStateManager {
 
             if (!isTransientPickerToggle) {
                 try {
-                    DeparturesCacheRepository(context).saveActiveSelection(
+                    repositoryProvider(context).saveActiveSelection(
                         newState.activeStopIndex,
                         newState.activePlatformCode
                     )

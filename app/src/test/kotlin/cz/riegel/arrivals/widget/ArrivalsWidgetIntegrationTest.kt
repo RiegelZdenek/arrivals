@@ -2,7 +2,7 @@ package cz.riegel.arrivals.widget
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import cz.riegel.arrivals.data.DeparturesCacheRepository
+import cz.riegel.arrivals.data.DeparturesRepository
 import cz.riegel.arrivals.data.model.GolemioDepartureBoardResponse
 import cz.riegel.arrivals.data.model.GolemioDepartureDto
 import cz.riegel.arrivals.data.model.GolemioDepartureStopDto
@@ -109,8 +109,8 @@ class ArrivalsWidgetIntegrationTest {
         assertEquals(PickerMode.Departures, state.pickerMode)
         assertEquals("Karlovo náměstí", state.activeStop.name)
         assertEquals("1", state.activePlatformCode)
-        assertEquals(1, DeparturesCacheRepository(context).getActiveStopIndex())
-        assertEquals("1", DeparturesCacheRepository(context).getActivePlatformCode())
+        assertEquals(1, DeparturesRepository.create(context).getActiveStopIndex())
+        assertEquals("1", DeparturesRepository.create(context).getActivePlatformCode())
 
         // Open Platform Picker -> PlatformPicker mode
         WidgetStateManager.onOpenPlatformPicker(context)
@@ -129,7 +129,7 @@ class ArrivalsWidgetIntegrationTest {
         state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
         assertEquals(PickerMode.Departures, state.pickerMode)
         assertEquals("2", state.activePlatformCode)
-        assertEquals("2", DeparturesCacheRepository(context).getActivePlatformCode())
+        assertEquals("2", DeparturesRepository.create(context).getActivePlatformCode())
 
         // Open StopPicker and run tickCountdowns -> countdowns refresh across stops while preserving Stop, Platform & PickerMode
         val baseTime = Instant.parse("2026-10-30T12:00:00Z")
@@ -225,7 +225,7 @@ class ArrivalsWidgetIntegrationTest {
             )
         )
 
-        val cacheRepo = DeparturesCacheRepository(context)
+        val cacheRepo = DeparturesRepository.create(context)
         // Ensure disk cache has initial selection
         assertEquals(0, cacheRepo.getActiveStopIndex())
         assertEquals("A", cacheRepo.getActivePlatformCode())
@@ -328,8 +328,8 @@ class ArrivalsWidgetIntegrationTest {
         assertEquals(1, state.activeDepartures.size)
         assertEquals("9", state.activeDepartures.first().line.name)
 
-        // 2. Persisted for active session in DeparturesCacheRepository
-        val cacheRepo = DeparturesCacheRepository(context)
+        // 2. Persisted for active session in DeparturesRepository
+        val cacheRepo = DeparturesRepository.create(context)
         assertEquals("B", cacheRepo.getActivePlatformCode())
 
         // 3. Persists across countdown ticks
@@ -437,7 +437,7 @@ class ArrivalsWidgetIntegrationTest {
     @Test
     fun stopSelection_networkFailure_restoresCachedDeparturesWithWarningBanner() = runBlocking {
         val now = Instant.now()
-        val cacheRepo = DeparturesCacheRepository(context)
+        val cacheRepo = DeparturesRepository.create(context)
 
         // Seed cache with departures for Karlovo náměstí
         val cachedResponse = GolemioDepartureBoardResponse(
@@ -456,7 +456,7 @@ class ArrivalsWidgetIntegrationTest {
                 )
             )
         )
-        cacheRepo.saveLastResponse(cachedResponse, now.minusSeconds(120))
+        cacheRepo.saveDepartures(cachedResponse, now.minusSeconds(120))
 
         val stop1 = sampleStop("s1", "I. P. Pavlova", listOf("A"))
         val stop2 = sampleStop("s2", "Karlovo náměstí", listOf("1"))

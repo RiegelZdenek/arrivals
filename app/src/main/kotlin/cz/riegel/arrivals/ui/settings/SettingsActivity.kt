@@ -23,10 +23,10 @@ import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import cz.riegel.arrivals.R
-import cz.riegel.arrivals.data.DeparturesCacheRepository
+import cz.riegel.arrivals.data.DeparturesRepository
 import cz.riegel.arrivals.data.SettingsRepository
 import cz.riegel.arrivals.data.StopRegistry
-import cz.riegel.arrivals.data.UserCoordinates
+import cz.riegel.arrivals.domain.model.Coordinates
 import cz.riegel.arrivals.widget.ArrivalsUpdateWorker
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
@@ -184,13 +184,9 @@ class SettingsActivity : AppCompatActivity() {
                     val accuracy = if (location.hasAccuracy()) "±${location.accuracy.toInt()} m" else "neznámá"
 
                     // Persist this fresh foreground fix immediately so the background widget worker has it
-                    DeparturesCacheRepository(this@SettingsActivity).saveLastCoordinates(
-                        UserCoordinates(
-                            lat = lat,
-                            lon = lon,
-                            timestamp = Instant.now(),
-                            accuracyMeters = if (location.hasAccuracy()) location.accuracy else null
-                        )
+                    DeparturesRepository.create(this@SettingsActivity).saveLocation(
+                        Coordinates(lat = lat, lon = lon),
+                        Instant.now()
                     )
                     if (settingsRepository.isConfigured()) {
                         ArrivalsUpdateWorker.enqueueOneTimeWork(this@SettingsActivity)

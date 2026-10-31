@@ -2,10 +2,10 @@ package cz.riegel.arrivals
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import cz.riegel.arrivals.data.DeparturesCacheRepository
-import cz.riegel.arrivals.data.LocationFallbackStrategy
+import cz.riegel.arrivals.data.DeparturesRepository
+import cz.riegel.arrivals.data.InMemoryDeparturesRepository
+import cz.riegel.arrivals.data.LocationResolution
 import cz.riegel.arrivals.data.StopRegistry
-import cz.riegel.arrivals.data.UserCoordinates
 import cz.riegel.arrivals.data.model.GolemioDepartureBoardResponse
 import cz.riegel.arrivals.data.model.GolemioDepartureDto
 import cz.riegel.arrivals.data.model.GolemioDepartureStopDto
@@ -93,31 +93,29 @@ class BugReproductionTest {
     @Test
     fun bug3_locationFallback_retainsLastKnownGpsWhenStationaryInEmulator() {
         val now = Instant.parse("2026-10-27T18:37:00Z")
-        val strategy = LocationFallbackStrategy(maxStaleDurationMinutes = 30)
+        val repository: DeparturesRepository = InMemoryDeparturesRepository(maxStaleDurationMinutes = 30)
 
-        // Stationary emulator GPS fix observed 10 minutes ago in SettingsActivity (even if emulator boot was earlier)
-        val observedInForeground = strategy.fromProviderReading(
-            lat = 50.08396,
-            lon = 14.45343,
-            accuracyMeters = 5.0f,
+        // Stationary emulator GPS fix observed 10 minutes ago in SettingsActivity
+        repository.saveLocation(
+            coordinates = Coordinates(lat = 50.08396, lon = 14.45343),
             observedAt = now.minusSeconds(10 * 60)
         )
 
-        // When background worker runs and freshLocation is null (foreground-only permission), cached fix is used
-        val resolved = strategy.resolveCoordinates(
-            freshLocation = null,
-            cachedLocation = observedInForeground,
+        // When background worker runs and freshCoordinates is null (foreground-only permission), cached fix is used
+        val resolved = repository.resolveLocation(
+            freshCoordinates = null,
             currentTime = now
         )
         assertNotNull("Should fall back to last known coordinates rather than losing GPS completely", resolved)
-        assertEquals(50.08396, resolved!!.lat, 0.0001)
+        assertTrue(resolved is LocationResolution.UndergroundFallback)
+        assertEquals(50.08396, resolved!!.coordinates.lat, 0.0001)
     }
 
     @Test
     fun bug4_widgetPlatformSelection_survivesProcessRecreationAndUpdatesState() = runTest {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val now = Instant.now()
-        val cacheRepo = DeparturesCacheRepository(context)
+        val repository = DeparturesRepository.create(context)
 
         val dto = GolemioDepartureBoardResponse(
             stops = listOf(
@@ -146,8 +144,8 @@ class BugReproductionTest {
                 )
             )
         )
-        cacheRepo.saveLastResponse(dto, now)
-        cacheRepo.saveLastCoordinates(UserCoordinates(50.08391, 14.45371, now))
+        repository.saveDepartures(dto, now)
+        repository.saveLocation(Coordinates(50.08391, 14.45371), now)
 
         // Simulate process recreation where in-memory state was reset to Loading
         WidgetStateManager.setState(context, ArrivalsViewState.Loading())

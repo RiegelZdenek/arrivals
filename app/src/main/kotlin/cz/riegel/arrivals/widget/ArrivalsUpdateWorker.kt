@@ -16,13 +16,11 @@ import androidx.work.WorkerParameters
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
-import cz.riegel.arrivals.data.CacheResilience
-import cz.riegel.arrivals.data.DeparturesCacheRepository
+import cz.riegel.arrivals.data.DeparturesRepository
 import cz.riegel.arrivals.data.GolemioApiClient
-import cz.riegel.arrivals.data.LocationFallbackStrategy
+import cz.riegel.arrivals.data.LocationResolution
 import cz.riegel.arrivals.data.SettingsRepository
 import cz.riegel.arrivals.data.StopRegistry
-import cz.riegel.arrivals.data.UserCoordinates
 import cz.riegel.arrivals.domain.ArrivalsAction
 import cz.riegel.arrivals.domain.ArrivalsEngine
 import cz.riegel.arrivals.domain.ArrivalsViewState
@@ -38,9 +36,8 @@ class ArrivalsUpdateWorker(
 ) : CoroutineWorker(appContext, workerParams) {
 
     private val settingsRepository = SettingsRepository(appContext)
-    private val cacheRepository = DeparturesCacheRepository(appContext)
+    private val departuresRepository = DeparturesRepository.create(appContext)
     private val engine = ArrivalsEngine()
-    private val locationStrategy = LocationFallbackStrategy(maxStaleDurationMinutes = 30)
 
     override suspend fun doWork(): Result {
         val apiKey = settingsRepository.getApiKey()
@@ -64,25 +61,17 @@ class ArrivalsUpdateWorker(
         val now = Instant.now()
 
         // 1. Resolve coordinates (High-Accuracy GPS or 30-min underground fallback per ADR-0003)
-        val freshLocation = getFreshLocation()
-        val cachedCoords = cacheRepository.getLastCoordinates()
-        val resolvedCoords = locationStrategy.resolveCoordinates(
-            freshLocation = freshLocation,
-            cachedLocation = cachedCoords,
+        val locationResolution = departuresRepository.resolveLocation(
+            freshCoordinates = getFreshLocation(),
             currentTime = now
         )
 
-        if (resolvedCoords == null) {
-            handleNoValidLocation(now, cachedCoords)
+        if (locationResolution == null) {
+            handleNoValidLocation(now)
             return Result.success()
         }
 
-        // Persist fresh fix
-        if (!resolvedCoords.isStaleUndergroundFallback) {
-            cacheRepository.saveLastCoordinates(resolvedCoords)
-        }
-
-        val userCoords = Coordinates(lat = resolvedCoords.lat, lon = resolvedCoords.lon)
+        val userCoords = locationResolution.coordinates
 
         // 2. Fetch live departures with adaptive radius expansion
         val preferredRadius = settingsRepository.getSearchRadius()
@@ -93,8 +82,8 @@ class ArrivalsUpdateWorker(
 
         for (radius in searchRadii) {
             val responseResult = apiClient.getDepartures(
-                lat = resolvedCoords.lat,
-                lon = resolvedCoords.lon,
+                lat = userCoords.lat,
+                lon = userCoords.lon,
                 radiusMeters = radius,
                 limit = 60
             )
@@ -114,12 +103,9 @@ class ArrivalsUpdateWorker(
         }
 
         if (apiSuccessResponse != null) {
-            cacheRepository.saveLastResponse(apiSuccessResponse, now)
+            departuresRepository.saveDepartures(apiSuccessResponse, now)
 
-            val ageMins = java.time.Duration.between(resolvedCoords.timestamp, now).toMinutes()
-            val warningBanner = if (resolvedCoords.isStaleUndergroundFallback && ageMins >= 5) {
-                "Underground GPS fallback • Last known location"
-            } else null
+            val warningBanner = (locationResolution as? LocationResolution.UndergroundFallback)?.warningBanner
 
             val finalState = engine.reduce(
                 WidgetStateManager.getState(appContext),
@@ -141,7 +127,7 @@ class ArrivalsUpdateWorker(
         return Result.success()
     }
 
-    private suspend fun handleNoValidLocation(now: Instant, cachedCoords: UserCoordinates?) {
+    private suspend fun handleNoValidLocation(now: Instant) {
         val hasFine = appContext.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
         val hasCoarse = appContext.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
         val errorMsg = if (!hasFine && !hasCoarse) {
@@ -151,7 +137,7 @@ class ArrivalsUpdateWorker(
         }
         restoreCachedDepartures(
             now = now,
-            userCoords = cachedCoords?.let { Coordinates(it.lat, it.lon) },
+            userCoords = null,
             fallbackErrorMessage = errorMsg
         )
     }
@@ -165,21 +151,16 @@ class ArrivalsUpdateWorker(
             context = appContext,
             now = now,
             userCoords = userCoords,
-            fallbackErrorMessage = fallbackErrorMessage
+            fallbackErrorMessage = fallbackErrorMessage,
+            repository = departuresRepository
         )
     }
 
     @SuppressLint("MissingPermission")
-    private suspend fun getFreshLocation(): UserCoordinates? {
-        val now = Instant.now()
+    private suspend fun getFreshLocation(): Coordinates? {
         val simulatedHub = settingsRepository.getSelectedSimulationHub()
         if (simulatedHub != null) {
-            return locationStrategy.fromProviderReading(
-                lat = simulatedHub.lat,
-                lon = simulatedHub.lon,
-                accuracyMeters = 1.0f,
-                observedAt = now
-            )
+            return Coordinates(lat = simulatedHub.lat, lon = simulatedHub.lon)
         }
 
         val hasFine = appContext.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
@@ -202,12 +183,7 @@ class ArrivalsUpdateWorker(
             }
 
             if (freshLocation != null) {
-                return locationStrategy.fromProviderReading(
-                    lat = freshLocation.latitude,
-                    lon = freshLocation.longitude,
-                    accuracyMeters = freshLocation.accuracy,
-                    observedAt = now
-                )
+                return Coordinates(lat = freshLocation.latitude, lon = freshLocation.longitude)
             }
 
             // 2. Fallback to Fused lastLocation if fresh query timed out
@@ -217,23 +193,13 @@ class ArrivalsUpdateWorker(
                 null
             }
             if (lastLocation != null) {
-                return locationStrategy.fromProviderReading(
-                    lat = lastLocation.latitude,
-                    lon = lastLocation.longitude,
-                    accuracyMeters = lastLocation.accuracy,
-                    observedAt = now
-                )
+                return Coordinates(lat = lastLocation.latitude, lon = lastLocation.longitude)
             }
 
             // 3. Fallback to Android LocationManager providers (reliable on emulators)
             val lmLocation = getLocationFromLocationManager(appContext)
             if (lmLocation != null) {
-                locationStrategy.fromProviderReading(
-                    lat = lmLocation.latitude,
-                    lon = lmLocation.longitude,
-                    accuracyMeters = if (lmLocation.hasAccuracy()) lmLocation.accuracy else null,
-                    observedAt = now
-                )
+                Coordinates(lat = lmLocation.latitude, lon = lmLocation.longitude)
             } else {
                 null
             }
@@ -271,42 +237,38 @@ class ArrivalsUpdateWorker(
             context: Context,
             now: Instant = Instant.now(),
             userCoords: Coordinates? = null,
-            fallbackErrorMessage: String? = null
+            fallbackErrorMessage: String? = null,
+            repository: DeparturesRepository = WidgetStateManager.repositoryProvider(context)
         ) {
-            val cacheRepository = DeparturesCacheRepository(context)
             val engine = ArrivalsEngine()
-            val cached = cacheRepository.getLastResponse()
+            val cached = repository.getCachedDepartures()
             val current = WidgetStateManager.getState(context)
             val targetStop = (current as? ArrivalsViewState.Content)?.activeStop
 
-            if (cached != null) {
-                val (cachedResponse, cachedTime) = cached
-                if (cachedResponse.stops.isNotEmpty() || cachedResponse.departures.isNotEmpty()) {
-                    val warningBanner = CacheResilience.formatCachedWarning(cachedTime)
-                    val updatedState = engine.reduce(
-                        current,
-                        ArrivalsAction.IngestApiResponse(
-                            response = cachedResponse,
-                            userCoordinates = userCoords,
-                            referenceTime = now,
-                            cachedWarning = warningBanner
-                        )
+            if (cached != null && (cached.response.stops.isNotEmpty() || cached.response.departures.isNotEmpty())) {
+                val updatedState = engine.reduce(
+                    current,
+                    ArrivalsAction.IngestApiResponse(
+                        response = cached.response,
+                        userCoordinates = userCoords ?: cached.coordinates,
+                        referenceTime = now,
+                        cachedWarning = cached.warningBanner
                     )
-                    if (updatedState is ArrivalsViewState.Content) {
-                        val matchedStop = if (targetStop != null) {
-                            updatedState.stops.find { it.id == targetStop.id || it.name == targetStop.name }
-                        } else {
-                            updatedState.stops.firstOrNull()
-                        }
+                )
+                if (updatedState is ArrivalsViewState.Content) {
+                    val matchedStop = if (targetStop != null) {
+                        updatedState.stops.find { it.id == targetStop.id || it.name == targetStop.name }
+                    } else {
+                        updatedState.stops.firstOrNull()
+                    }
 
-                        val hasCachedDeparturesForStop = matchedStop != null &&
-                            matchedStop.platforms.any { it.departures.isNotEmpty() }
+                    val hasCachedDeparturesForStop = matchedStop != null &&
+                        matchedStop.platforms.any { it.departures.isNotEmpty() }
 
-                        if (hasCachedDeparturesForStop) {
-                            WidgetStateManager.setState(context, updatedState)
-                            WidgetStateManager.updateAllWidgets(context)
-                            return
-                        }
+                    if (hasCachedDeparturesForStop) {
+                        WidgetStateManager.setState(context, updatedState)
+                        WidgetStateManager.updateAllWidgets(context)
+                        return
                     }
                 }
             }
