@@ -2,7 +2,6 @@ package cz.riegel.arrivals.widget
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
-import androidx.work.WorkManager
 import cz.riegel.arrivals.data.DeparturesCacheRepository
 import cz.riegel.arrivals.data.model.GolemioDepartureBoardResponse
 import cz.riegel.arrivals.data.model.GolemioDepartureDto
@@ -26,7 +25,6 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -400,24 +398,20 @@ class ArrivalsWidgetIntegrationTest {
 
         // 2. When worker completes and updates data with fresh departures for Karlovo náměstí
         val now = Instant.now()
-        val freshStop2 = Stop(
-            id = "s2",
-            name = "Karlovo náměstí",
-            platforms = listOf(
-                Platform(
-                    id = "s2_1",
-                    code = "1",
-                    departures = listOf(
-                        Departure(
-                            id = "dep_fresh",
-                            line = Line("18", TransportMode.Tram),
-                            headsign = "Nádraží Podbaba",
-                            scheduledTime = now.plusSeconds(180),
-                            predictedTime = now.plusSeconds(180),
-                            countdown = CountdownDisplay(3, "3 min", false),
-                            delay = Delay(0, false)
-                        )
-                    )
+        val freshResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "s1", stopName = "I. P. Pavlova", platformCode = "A", stopLat = 50.075, stopLon = 14.430),
+                GolemioStopDto(stopId = "s2", stopName = "Karlovo náměstí", platformCode = "1", stopLat = 50.075, stopLon = 14.430)
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.plusSeconds(180).toString(),
+                        predicted = now.plusSeconds(180).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "s2", name = "Karlovo náměstí", platformCode = "1"),
+                    route = GolemioRouteDto(shortName = "18", type = 0),
+                    trip = GolemioTripDto(headsign = "Nádraží Podbaba")
                 )
             )
         )
@@ -425,11 +419,14 @@ class ArrivalsWidgetIntegrationTest {
         val engine = cz.riegel.arrivals.domain.ArrivalsEngine()
         val next = engine.reduce(
             state,
-            ArrivalsAction.UpdateData(stops = listOf(stop1, freshStop2))
+            ArrivalsAction.IngestApiResponse(
+                response = freshResponse,
+                referenceTime = now
+            )
         )
         WidgetStateManager.setState(context, next)
 
-        state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
+        state = WidgetStateManager.getState(context, now) as ArrivalsViewState.Content
         // Skeletons and refreshing dismissed, live fresh departures displayed
         assertFalse(state.isLoadingDepartures)
         assertFalse(state.isRefreshing)

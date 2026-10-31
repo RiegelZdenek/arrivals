@@ -1,5 +1,13 @@
 package cz.riegel.arrivals.domain
 
+import cz.riegel.arrivals.data.model.GolemioDelayDto
+import cz.riegel.arrivals.data.model.GolemioDepartureBoardResponse
+import cz.riegel.arrivals.data.model.GolemioDepartureDto
+import cz.riegel.arrivals.data.model.GolemioDepartureStopDto
+import cz.riegel.arrivals.data.model.GolemioRouteDto
+import cz.riegel.arrivals.data.model.GolemioStopDto
+import cz.riegel.arrivals.data.model.GolemioTimestampDto
+import cz.riegel.arrivals.data.model.GolemioTripDto
 import cz.riegel.arrivals.domain.model.Coordinates
 import cz.riegel.arrivals.domain.model.CountdownDisplay
 import cz.riegel.arrivals.domain.model.Delay
@@ -9,8 +17,10 @@ import cz.riegel.arrivals.domain.model.Platform
 import cz.riegel.arrivals.domain.model.Stop
 import cz.riegel.arrivals.domain.model.TransportMode
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.time.Instant
 
@@ -19,6 +29,7 @@ class ArrivalsEngineTest {
     private val engine = ArrivalsEngine()
 
     private val userCoords = Coordinates(lat = 50.0755, lon = 14.4302)
+    private val now = Instant.parse("2026-10-23T14:30:00Z")
 
     private fun sampleDeparture(headsign: String) = Departure(
         id = "dep_1",
@@ -387,7 +398,7 @@ class ArrivalsEngineTest {
     @Test
     fun stateReducer_updateDataPreservesActiveStopPlatformAndOpenPicker() {
         val stopNear = Stop(
-            id = "s_near",
+            id = "I. P. Pavlova",
             name = "I. P. Pavlova",
             lat = 50.0754,
             lon = 14.4301,
@@ -397,7 +408,7 @@ class ArrivalsEngineTest {
             )
         )
         val stopFar = Stop(
-            id = "s_far",
+            id = "Karlovo náměstí",
             name = "Karlovo náměstí",
             lat = 50.0760,
             lon = 14.4200,
@@ -405,6 +416,12 @@ class ArrivalsEngineTest {
                 Platform("p_1", "1", 50.0760, 14.4200),
                 Platform("p_2", "2", 50.0765, 14.4210)
             )
+        )
+        val rawStops = listOf(
+            GolemioStopDto("p_1", "Karlovo náměstí", "1", 50.0760, 14.4200),
+            GolemioStopDto("p_2", "Karlovo náměstí", "2", 50.0765, 14.4210),
+            GolemioStopDto("p_a", "I. P. Pavlova", "A", 50.0754, 14.4301),
+            GolemioStopDto("p_b", "I. P. Pavlova", "B", 50.0758, 14.4306)
         )
 
         // User manually selected Karlovo náměstí (index 1) and Platform "2" (not the closest), with StopPicker open
@@ -418,9 +435,10 @@ class ArrivalsEngineTest {
 
         val refreshedAfterStopPicker = engine.reduce(
             currentState,
-            ArrivalsAction.UpdateData(
-                stops = listOf(stopFar, stopNear),
-                userCoordinates = userCoords
+            ArrivalsAction.IngestApiResponse(
+                response = GolemioDepartureBoardResponse(stops = rawStops),
+                userCoordinates = userCoords,
+                referenceTime = now
             )
         ) as ArrivalsViewState.Content
 
@@ -433,9 +451,10 @@ class ArrivalsEngineTest {
         val platformPickerState = refreshedAfterStopPicker.copy(pickerMode = PickerMode.PlatformPicker)
         val refreshedAfterPlatformPicker = engine.reduce(
             platformPickerState,
-            ArrivalsAction.UpdateData(
-                stops = listOf(stopNear, stopFar),
-                userCoordinates = userCoords
+            ArrivalsAction.IngestApiResponse(
+                response = GolemioDepartureBoardResponse(stops = rawStops),
+                userCoordinates = userCoords,
+                referenceTime = now
             )
         ) as ArrivalsViewState.Content
 
@@ -447,7 +466,7 @@ class ArrivalsEngineTest {
     @Test
     fun stateReducer_updateDataFallsBackWhenSelectedPlatformOrStopOrPickerPreconditionDisappears() {
         val stopNear = Stop(
-            id = "s_near",
+            id = "I. P. Pavlova",
             name = "I. P. Pavlova",
             lat = 50.0754,
             lon = 14.4301,
@@ -457,7 +476,7 @@ class ArrivalsEngineTest {
             )
         )
         val stopFarSinglePlatform = Stop(
-            id = "s_far",
+            id = "Karlovo náměstí",
             name = "Karlovo náměstí",
             lat = 50.0760,
             lon = 14.4200,
@@ -485,9 +504,16 @@ class ArrivalsEngineTest {
 
         val afterPlatformDisappears = engine.reduce(
             stateWithMissingPlatform,
-            ArrivalsAction.UpdateData(
-                stops = listOf(stopNear, stopFarSinglePlatform),
-                userCoordinates = userCoords
+            ArrivalsAction.IngestApiResponse(
+                response = GolemioDepartureBoardResponse(
+                    stops = listOf(
+                        GolemioStopDto("p_a", "I. P. Pavlova", "A", 50.0754, 14.4301),
+                        GolemioStopDto("p_b", "I. P. Pavlova", "B", 50.0758, 14.4306),
+                        GolemioStopDto("p_1", "Karlovo náměstí", "1", 50.0760, 14.4200)
+                    )
+                ),
+                userCoordinates = userCoords,
+                referenceTime = now
             )
         ) as ArrivalsViewState.Content
 
@@ -500,9 +526,15 @@ class ArrivalsEngineTest {
         val stateWithStopPicker = afterPlatformDisappears.copy(pickerMode = PickerMode.StopPicker)
         val afterStopDisappears = engine.reduce(
             stateWithStopPicker,
-            ArrivalsAction.UpdateData(
-                stops = listOf(stopNear),
-                userCoordinates = userCoords
+            ArrivalsAction.IngestApiResponse(
+                response = GolemioDepartureBoardResponse(
+                    stops = listOf(
+                        GolemioStopDto("p_a", "I. P. Pavlova", "A", 50.0754, 14.4301),
+                        GolemioStopDto("p_b", "I. P. Pavlova", "B", 50.0758, 14.4306)
+                    )
+                ),
+                userCoordinates = userCoords,
+                referenceTime = now
             )
         ) as ArrivalsViewState.Content
 
@@ -512,7 +544,262 @@ class ArrivalsEngineTest {
         assertEquals(PickerMode.Departures, afterStopDisappears.pickerMode)
     }
 
-    private fun assertTrue(message: String, condition: Boolean) {
-        org.junit.Assert.assertTrue(message, condition)
+    @Test
+    fun ingestApiResponse_mapsStopsPlatformsAndDeparturesCorrectly() {
+        val response = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto("U100Z1P", "I. P. Pavlova", "A", 50.0755, 14.4302),
+                GolemioStopDto("U100Z2P", "I. P. Pavlova", "B", 50.0756, 14.4303)
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto("2026-10-23T16:33:00+02:00", "2026-10-23T16:35:00+02:00"),
+                    delay = GolemioDelayDto(isAvailable = true, minutes = 2),
+                    route = GolemioRouteDto(shortName = "22", type = 0, isNight = false),
+                    stop = GolemioDepartureStopDto(id = "U100Z1P", platformCode = "A", name = "I. P. Pavlova"),
+                    trip = GolemioTripDto(headsign = "Bílá Hora")
+                )
+            )
+        )
+
+        val state = engine.reduce(
+            ArrivalsViewState.Loading(),
+            ArrivalsAction.IngestApiResponse(response, userCoords, now)
+        ) as ArrivalsViewState.Content
+
+        assertEquals(1, state.stops.size)
+        val stop = state.stops[0]
+        assertEquals("I. P. Pavlova", stop.name)
+        assertEquals(2, stop.platforms.size)
+
+        val platformA = stop.platforms.first { it.code == "A" }
+        assertEquals(1, platformA.departures.size)
+
+        val dep = platformA.departures[0]
+        assertEquals("22", dep.line.name)
+        assertEquals(TransportMode.Tram, dep.line.transportMode)
+        assertEquals("Bílá Hora", dep.headsign)
+        assertEquals(5, dep.countdown.minutesRemaining)
+        assertEquals("5 min", dep.countdown.displayText)
+        assertFalse(dep.countdown.isClockTime)
+        assertEquals(2, dep.delay.minutes)
+        assertTrue(dep.delay.isDelayed)
+    }
+
+    @Test
+    fun ingestApiResponse_handlesLessThanOneMinuteCountdown() {
+        val response = GolemioDepartureBoardResponse(
+            stops = listOf(GolemioStopDto("U100Z1P", "Muzeum", "A", 50.07, 14.43)),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto("2026-10-23T16:30:20+02:00", "2026-10-23T16:30:20+02:00"),
+                    delay = GolemioDelayDto(isAvailable = true, minutes = 0),
+                    route = GolemioRouteDto(shortName = "C", type = 1),
+                    stop = GolemioDepartureStopDto(id = "U100Z1P", platformCode = "A"),
+                    trip = GolemioTripDto(headsign = "Háje")
+                )
+            )
+        )
+
+        val state = engine.reduce(
+            ArrivalsViewState.Loading(),
+            ArrivalsAction.IngestApiResponse(response, userCoords, now)
+        ) as ArrivalsViewState.Content
+
+        val dep = state.stops[0].platforms[0].departures[0]
+        assertEquals("<1 min", dep.countdown.displayText)
+        assertFalse(dep.countdown.isClockTime)
+        assertEquals(TransportMode.Metro, dep.line.transportMode)
+    }
+
+    @Test
+    fun ingestApiResponse_handlesFarFutureDeparture_formatsAsClockTime() {
+        val response = GolemioDepartureBoardResponse(
+            stops = listOf(GolemioStopDto("U100Z1P", "Muzeum", "A", 50.07, 14.43)),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto("2026-10-23T17:15:00+02:00", "2026-10-23T17:15:00+02:00"),
+                    route = GolemioRouteDto(shortName = "S9", type = 2),
+                    stop = GolemioDepartureStopDto(id = "U100Z1P", platformCode = "A"),
+                    trip = GolemioTripDto(headsign = "Benešov u Prahy")
+                )
+            )
+        )
+
+        val state = engine.reduce(
+            ArrivalsViewState.Loading(),
+            ArrivalsAction.IngestApiResponse(response, userCoords, now)
+        ) as ArrivalsViewState.Content
+
+        val dep = state.stops[0].platforms[0].departures[0]
+        assertTrue(dep.countdown.isClockTime)
+        assertEquals("17:15", dep.countdown.displayText)
+        assertEquals(TransportMode.Train, dep.line.transportMode)
+    }
+
+    @Test
+    fun ingestApiResponse_resolvesTransportModesAndLetterSymbolsCorrectly() {
+        val response = GolemioDepartureBoardResponse(
+            stops = listOf(GolemioStopDto("S1", "Test Stop", "1", 50.07, 14.43)),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(scheduled = "2026-10-23T16:35:00+02:00"),
+                    route = GolemioRouteDto(shortName = "22", type = 0),
+                    stop = GolemioDepartureStopDto(id = "S1", platformCode = "1"),
+                    trip = GolemioTripDto(headsign = "Tram")
+                ),
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(scheduled = "2026-10-23T16:36:00+02:00"),
+                    route = GolemioRouteDto(shortName = "A", type = 1),
+                    stop = GolemioDepartureStopDto(id = "S1", platformCode = "1"),
+                    trip = GolemioTripDto(headsign = "Metro")
+                ),
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(scheduled = "2026-10-23T16:37:00+02:00"),
+                    route = GolemioRouteDto(shortName = "S1", type = 2),
+                    stop = GolemioDepartureStopDto(id = "S1", platformCode = "1"),
+                    trip = GolemioTripDto(headsign = "Train")
+                ),
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(scheduled = "2026-10-23T16:38:00+02:00"),
+                    route = GolemioRouteDto(shortName = "135", type = 3),
+                    stop = GolemioDepartureStopDto(id = "S1", platformCode = "1"),
+                    trip = GolemioTripDto(headsign = "Bus")
+                ),
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(scheduled = "2026-10-23T16:39:00+02:00"),
+                    route = GolemioRouteDto(shortName = "58", type = 11),
+                    stop = GolemioDepartureStopDto(id = "S1", platformCode = "1"),
+                    trip = GolemioTripDto(headsign = "Trolleybus")
+                )
+            )
+        )
+
+        val state = engine.reduce(
+            ArrivalsViewState.Loading(),
+            ArrivalsAction.IngestApiResponse(response, userCoords, now)
+        ) as ArrivalsViewState.Content
+
+        val departures = state.stops[0].platforms[0].departures
+        assertEquals(5, departures.size)
+        assertEquals(TransportMode.Tram, departures[0].line.transportMode)
+        assertEquals("T", departures[0].line.transportMode.symbol)
+        assertEquals(TransportMode.Metro, departures[1].line.transportMode)
+        assertEquals("M", departures[1].line.transportMode.symbol)
+        assertEquals(TransportMode.Train, departures[2].line.transportMode)
+        assertEquals("V", departures[2].line.transportMode.symbol)
+        assertEquals(TransportMode.Bus, departures[3].line.transportMode)
+        assertEquals("B", departures[3].line.transportMode.symbol)
+        assertEquals(TransportMode.Trolleybus, departures[4].line.transportMode)
+        assertEquals("R", departures[4].line.transportMode.symbol)
+    }
+
+    @Test
+    fun ingestApiResponse_resolvesStopNameFromStopsArrayWhenDepartureStopNameIsAbsent() {
+        val response = GolemioDepartureBoardResponse(
+            stops = listOf(GolemioStopDto("U1072Z101P", "Chodov", "M1", 50.0312, 14.4908)),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto("2026-10-23T16:34:00+02:00", "2026-10-23T16:34:00+02:00", "4"),
+                    route = GolemioRouteDto(shortName = "C", type = 1),
+                    stop = GolemioDepartureStopDto(id = "U1072Z101P", platformCode = "M1", name = ""),
+                    trip = GolemioTripDto(headsign = "Letňany")
+                )
+            )
+        )
+
+        val state = engine.reduce(
+            ArrivalsViewState.Loading(),
+            ArrivalsAction.IngestApiResponse(response, userCoords, now)
+        ) as ArrivalsViewState.Content
+
+        assertEquals(1, state.stops.size)
+        assertEquals("Chodov", state.stops[0].name)
+        assertEquals(1, state.stops[0].platforms.size)
+        assertEquals(1, state.stops[0].platforms[0].departures.size)
+        assertEquals("Letňany", state.stops[0].platforms[0].departures[0].headsign)
+    }
+
+    @Test
+    fun ingestApiResponse_handlesEmptyDeparturesWithStopsList() {
+        val response = GolemioDepartureBoardResponse(
+            stops = listOf(GolemioStopDto("U100Z1P", "Muzeum", "A", 50.07, 14.43)),
+            departures = emptyList()
+        )
+
+        val state = engine.reduce(
+            ArrivalsViewState.Loading(),
+            ArrivalsAction.IngestApiResponse(response, userCoords, now)
+        ) as ArrivalsViewState.Content
+
+        assertEquals(1, state.stops.size)
+        assertEquals("Muzeum", state.stops[0].name)
+        assertTrue(state.stops[0].platforms[0].departures.isEmpty())
+    }
+
+    @Test
+    fun ingestApiResponse_retainsExistingStopsWithWarningWhenEmptyResponseArrivesDuringRefresh() {
+        val existingContent = engine.reduce(
+            ArrivalsViewState.Loading(),
+            ArrivalsAction.IngestApiResponse(
+                response = GolemioDepartureBoardResponse(
+                    stops = listOf(GolemioStopDto("U100Z1P", "Muzeum", "A", 50.07, 14.43))
+                ),
+                userCoordinates = userCoords,
+                referenceTime = now
+            )
+        ) as ArrivalsViewState.Content
+
+        val afterEmptyRefresh = engine.reduce(
+            existingContent.copy(isRefreshing = true),
+            ArrivalsAction.IngestApiResponse(
+                response = GolemioDepartureBoardResponse(stops = emptyList(), departures = emptyList()),
+                userCoordinates = userCoords,
+                referenceTime = now
+            )
+        ) as ArrivalsViewState.Content
+
+        assertEquals(1, afterEmptyRefresh.stops.size)
+        assertEquals("Muzeum", afterEmptyRefresh.stops[0].name)
+        assertFalse(afterEmptyRefresh.isRefreshing)
+        assertNotNull(afterEmptyRefresh.cachedWarning)
+    }
+
+    @Test
+    fun tickCountdown_decrementsMinutesAndRemovesDepartedVehiclesWithoutRefetching() {
+        val response = GolemioDepartureBoardResponse(
+            stops = listOf(GolemioStopDto("U100Z1P", "Muzeum", "A", 50.07, 14.43)),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto("2026-10-23T16:30:10+02:00", "2026-10-23T16:30:10+02:00"),
+                    route = GolemioRouteDto(shortName = "22", type = 0),
+                    stop = GolemioDepartureStopDto(id = "U100Z1P", platformCode = "A"),
+                    trip = GolemioTripDto(headsign = "Soon")
+                ),
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto("2026-10-23T16:33:00+02:00", "2026-10-23T16:33:00+02:00"),
+                    route = GolemioRouteDto(shortName = "14", type = 0),
+                    stop = GolemioDepartureStopDto(id = "U100Z1P", platformCode = "A"),
+                    trip = GolemioTripDto(headsign = "Later")
+                )
+            )
+        )
+
+        val initial = engine.reduce(
+            ArrivalsViewState.Loading(),
+            ArrivalsAction.IngestApiResponse(response, userCoords, now)
+        ) as ArrivalsViewState.Content
+        assertEquals(2, initial.stops[0].platforms[0].departures.size)
+
+        val ticked = engine.reduce(
+            initial,
+            ArrivalsAction.TickCountdown(now.plusSeconds(60))
+        ) as ArrivalsViewState.Content
+
+        val remaining = ticked.stops[0].platforms[0].departures
+        assertEquals(1, remaining.size)
+        assertEquals("Later", remaining[0].headsign)
+        assertEquals(2, remaining[0].countdown.minutesRemaining)
+        assertEquals("2 min", remaining[0].countdown.displayText)
     }
 }

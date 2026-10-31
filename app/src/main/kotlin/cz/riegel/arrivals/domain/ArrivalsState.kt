@@ -1,10 +1,12 @@
 package cz.riegel.arrivals.domain
 
+import cz.riegel.arrivals.data.model.GolemioDepartureBoardResponse
 import cz.riegel.arrivals.domain.model.Coordinates
 import cz.riegel.arrivals.domain.model.Departure
 import cz.riegel.arrivals.domain.model.Platform
 import cz.riegel.arrivals.domain.model.Stop
 import cz.riegel.arrivals.domain.model.TransportMode
+import java.time.Instant
 
 enum class PickerMode {
     Departures,
@@ -157,9 +159,13 @@ sealed interface ArrivalsAction {
     data class SelectPlatform(val code: String) : ArrivalsAction
     data object Refresh : ArrivalsAction
     data class SetRefreshing(val isRefreshing: Boolean) : ArrivalsAction
-    data class UpdateData(
-        val stops: List<Stop>,
+    data class IngestApiResponse(
+        val response: GolemioDepartureBoardResponse,
         val userCoordinates: Coordinates? = null,
+        val referenceTime: Instant = Instant.now(),
         val cachedWarning: String? = null
+    ) : ArrivalsAction
+    data class TickCountdown(
+        val referenceTime: Instant = Instant.now()
     ) : ArrivalsAction
 }

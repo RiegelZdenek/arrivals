@@ -26,7 +26,6 @@ import cz.riegel.arrivals.data.UserCoordinates
 import cz.riegel.arrivals.domain.ArrivalsAction
 import cz.riegel.arrivals.domain.ArrivalsEngine
 import cz.riegel.arrivals.domain.ArrivalsViewState
-import cz.riegel.arrivals.domain.DepartureNormalizer
 import cz.riegel.arrivals.domain.model.Coordinates
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withTimeoutOrNull
@@ -40,7 +39,6 @@ class ArrivalsUpdateWorker(
 
     private val settingsRepository = SettingsRepository(appContext)
     private val cacheRepository = DeparturesCacheRepository(appContext)
-    private val normalizer = DepartureNormalizer()
     private val engine = ArrivalsEngine()
     private val locationStrategy = LocationFallbackStrategy(maxStaleDurationMinutes = 30)
 
@@ -117,27 +115,21 @@ class ArrivalsUpdateWorker(
 
         if (apiSuccessResponse != null) {
             cacheRepository.saveLastResponse(apiSuccessResponse, now)
-            val stops = normalizer.normalize(apiSuccessResponse, referenceTime = now)
 
             val ageMins = java.time.Duration.between(resolvedCoords.timestamp, now).toMinutes()
             val warningBanner = if (resolvedCoords.isStaleUndergroundFallback && ageMins >= 5) {
                 "Underground GPS fallback • Last known location"
             } else null
 
-            val updatedState = engine.reduce(
+            val finalState = engine.reduce(
                 WidgetStateManager.getState(appContext),
-                ArrivalsAction.UpdateData(
-                    stops = stops,
+                ArrivalsAction.IngestApiResponse(
+                    response = apiSuccessResponse,
                     userCoordinates = userCoords,
+                    referenceTime = now,
                     cachedWarning = warningBanner
                 )
             )
-
-            val finalState = if (updatedState is ArrivalsViewState.Content) {
-                updatedState.copy(isRefreshing = false)
-            } else {
-                updatedState
-            }
 
             WidgetStateManager.setState(appContext, finalState)
             WidgetStateManager.updateAllWidgets(appContext)
@@ -282,7 +274,6 @@ class ArrivalsUpdateWorker(
             fallbackErrorMessage: String? = null
         ) {
             val cacheRepository = DeparturesCacheRepository(context)
-            val normalizer = DepartureNormalizer()
             val engine = ArrivalsEngine()
             val cached = cacheRepository.getLastResponse()
             val current = WidgetStateManager.getState(context)
@@ -290,34 +281,33 @@ class ArrivalsUpdateWorker(
 
             if (cached != null) {
                 val (cachedResponse, cachedTime) = cached
-                val stops = normalizer.normalize(cachedResponse, referenceTime = now)
-                val matchedStop = if (targetStop != null) {
-                    stops.find { it.id == targetStop.id || it.name == targetStop.name }
-                } else {
-                    stops.firstOrNull()
-                }
-
-                val hasCachedDeparturesForStop = matchedStop != null &&
-                    matchedStop.platforms.any { it.departures.isNotEmpty() }
-
-                if (hasCachedDeparturesForStop) {
+                if (cachedResponse.stops.isNotEmpty() || cachedResponse.departures.isNotEmpty()) {
                     val warningBanner = CacheResilience.formatCachedWarning(cachedTime)
                     val updatedState = engine.reduce(
                         current,
-                        ArrivalsAction.UpdateData(
-                            stops = stops,
+                        ArrivalsAction.IngestApiResponse(
+                            response = cachedResponse,
                             userCoordinates = userCoords,
+                            referenceTime = now,
                             cachedWarning = warningBanner
                         )
                     )
-                    val finalState = if (updatedState is ArrivalsViewState.Content) {
-                        updatedState.copy(isRefreshing = false, isLoadingDepartures = false)
-                    } else {
-                        updatedState
+                    if (updatedState is ArrivalsViewState.Content) {
+                        val matchedStop = if (targetStop != null) {
+                            updatedState.stops.find { it.id == targetStop.id || it.name == targetStop.name }
+                        } else {
+                            updatedState.stops.firstOrNull()
+                        }
+
+                        val hasCachedDeparturesForStop = matchedStop != null &&
+                            matchedStop.platforms.any { it.departures.isNotEmpty() }
+
+                        if (hasCachedDeparturesForStop) {
+                            WidgetStateManager.setState(context, updatedState)
+                            WidgetStateManager.updateAllWidgets(context)
+                            return
+                        }
                     }
-                    WidgetStateManager.setState(context, finalState)
-                    WidgetStateManager.updateAllWidgets(context)
-                    return
                 }
             }
 

@@ -1,8 +1,6 @@
 package cz.riegel.arrivals
 
 import android.content.Context
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.test.core.app.ApplicationProvider
 import cz.riegel.arrivals.data.DeparturesCacheRepository
 import cz.riegel.arrivals.data.LocationFallbackStrategy
@@ -15,8 +13,10 @@ import cz.riegel.arrivals.data.model.GolemioRouteDto
 import cz.riegel.arrivals.data.model.GolemioStopDto
 import cz.riegel.arrivals.data.model.GolemioTimestampDto
 import cz.riegel.arrivals.data.model.GolemioTripDto
+import cz.riegel.arrivals.domain.ArrivalsAction
+import cz.riegel.arrivals.domain.ArrivalsEngine
 import cz.riegel.arrivals.domain.ArrivalsViewState
-import cz.riegel.arrivals.domain.DepartureNormalizer
+import cz.riegel.arrivals.domain.model.Coordinates
 import cz.riegel.arrivals.widget.WidgetStateManager
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -49,7 +49,7 @@ class BugReproductionTest {
     @Test
     fun bug2_normalizerAndProximity_keepsClosestStopFirstEvenWhenGolemioReturnsMultipleStops() {
         val now = Instant.parse("2026-10-27T18:30:00Z")
-        val normalizer = DepartureNormalizer()
+        val engine = ArrivalsEngine()
 
         // Suppose Golemio returns Rokycanova first in JSON, and Lipanská second (or Lipanská has platforms in stops[])
         val dto = GolemioDepartureBoardResponse(
@@ -74,8 +74,17 @@ class BugReproductionTest {
             )
         )
 
-        val stops = normalizer.normalize(dto, referenceTime = now)
-        val lipanska = stops.find { it.name == "Lipanská" }
+        val state = engine.reduce(
+            ArrivalsViewState.Loading(),
+            ArrivalsAction.IngestApiResponse(
+                response = dto,
+                userCoordinates = Coordinates(50.08396, 14.45343),
+                referenceTime = now
+            )
+        ) as ArrivalsViewState.Content
+
+        assertEquals("Lipanská", state.stops.first().name)
+        val lipanska = state.stops.find { it.name == "Lipanská" }
         assertNotNull("Lipanská should be normalized", lipanska)
         // Both platform A and platform B from dto.stops should be present on Lipanská
         assertEquals(listOf("A", "B"), lipanska!!.platforms.map { it.code })

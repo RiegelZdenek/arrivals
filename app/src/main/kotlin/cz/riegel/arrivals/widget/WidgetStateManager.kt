@@ -8,7 +8,6 @@ import cz.riegel.arrivals.data.DeparturesCacheRepository
 import cz.riegel.arrivals.domain.ArrivalsAction
 import cz.riegel.arrivals.domain.ArrivalsEngine
 import cz.riegel.arrivals.domain.ArrivalsViewState
-import cz.riegel.arrivals.domain.DepartureNormalizer
 import cz.riegel.arrivals.domain.PickerMode
 import cz.riegel.arrivals.domain.model.Coordinates
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,7 +16,6 @@ import java.time.Instant
 
 object WidgetStateManager {
     private val engine = ArrivalsEngine()
-    private val normalizer = DepartureNormalizer()
     private val _stateFlow = MutableStateFlow<ArrivalsViewState>(ArrivalsViewState.Loading())
     val stateFlow = _stateFlow.asStateFlow()
     private val GLANCE_STATE_VERSION_KEY = longPreferencesKey("glance_state_version")
@@ -33,8 +31,7 @@ object WidgetStateManager {
                 return rehydrated
             }
         } else if (current is ArrivalsViewState.Content) {
-            val updatedStops = normalizer.refreshCountdowns(current.stops, referenceTime)
-            val refreshed = current.copy(stops = updatedStops)
+            val refreshed = engine.reduce(current, ArrivalsAction.TickCountdown(referenceTime))
             _stateFlow.value = refreshed
             return refreshed
         }
@@ -56,17 +53,16 @@ object WidgetStateManager {
             val cacheRepo = DeparturesCacheRepository(context)
             val cached = cacheRepo.getLastResponse() ?: return null
             val (dto, _) = cached
-            val stops = normalizer.normalize(dto, referenceTime = referenceTime)
-            if (stops.isEmpty()) return null
 
             val cachedCoords = cacheRepo.getLastCoordinates()?.let {
                 Coordinates(it.lat, it.lon)
             }
             val reduced = engine.reduce(
                 ArrivalsViewState.Loading(),
-                ArrivalsAction.UpdateData(
-                    stops = stops,
+                ArrivalsAction.IngestApiResponse(
+                    response = dto,
                     userCoordinates = cachedCoords,
+                    referenceTime = referenceTime,
                     cachedWarning = null
                 )
             )

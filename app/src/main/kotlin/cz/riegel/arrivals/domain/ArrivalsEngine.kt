@@ -1,14 +1,30 @@
 package cz.riegel.arrivals.domain
 
+import cz.riegel.arrivals.data.model.GolemioDepartureBoardResponse
+import cz.riegel.arrivals.data.model.GolemioDepartureDto
 import cz.riegel.arrivals.domain.model.Coordinates
+import cz.riegel.arrivals.domain.model.CountdownDisplay
+import cz.riegel.arrivals.domain.model.Delay
+import cz.riegel.arrivals.domain.model.Departure
+import cz.riegel.arrivals.domain.model.Line
 import cz.riegel.arrivals.domain.model.Platform
 import cz.riegel.arrivals.domain.model.Stop
+import cz.riegel.arrivals.domain.model.TransportMode
+import java.time.Duration
+import java.time.Instant
+import java.time.OffsetDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.math.sqrt
 
-class ArrivalsEngine {
+class ArrivalsEngine(
+    private val zoneId: ZoneId = ZoneId.of("Europe/Prague")
+) {
+
+    private val clockTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 
     val adaptiveSearchRadii: List<Int> = listOf(100, 250, 500)
 
@@ -91,14 +107,24 @@ class ArrivalsEngine {
                     pickerMode = PickerMode.Departures
                 )
             }
-            is ArrivalsAction.UpdateData -> {
-                if (action.stops.isEmpty()) {
+            is ArrivalsAction.IngestApiResponse -> {
+                val rawStops = normalize(action.response, action.referenceTime)
+                if (rawStops.isEmpty()) {
+                    if (state is ArrivalsViewState.Content && state.stops.isNotEmpty()) {
+                        return state.copy(
+                            stops = refreshCountdowns(state.stops, action.referenceTime),
+                            isRefreshing = false,
+                            isLoadingDepartures = false,
+                            cachedWarning = action.cachedWarning ?: state.cachedWarning ?: "Unable to refresh departures"
+                        )
+                    }
                     return ArrivalsViewState.Empty()
                 }
+
                 val rankedStops = if (action.userCoordinates != null) {
-                    rankStopsByProximity(action.stops, action.userCoordinates)
+                    rankStopsByProximity(rawStops, action.userCoordinates)
                 } else {
-                    action.stops
+                    rawStops
                 }
 
                 if (state is ArrivalsViewState.Content && state.stops.isNotEmpty()) {
@@ -131,6 +157,8 @@ class ArrivalsEngine {
                         activePlatformCode = resolvedPlatformCode,
                         userCoordinates = action.userCoordinates,
                         cachedWarning = action.cachedWarning,
+                        isRefreshing = false,
+                        isLoadingDepartures = false,
                         pickerMode = resolvedPickerMode
                     )
                 }
@@ -141,8 +169,14 @@ class ArrivalsEngine {
                     activeStopIndex = 0,
                     activePlatformCode = resolveDefaultPlatformCode(primaryStop, action.userCoordinates),
                     userCoordinates = action.userCoordinates,
-                    cachedWarning = action.cachedWarning
+                    cachedWarning = action.cachedWarning,
+                    isRefreshing = false,
+                    isLoadingDepartures = false
                 )
+            }
+            is ArrivalsAction.TickCountdown -> {
+                if (state !is ArrivalsViewState.Content) return state
+                state.copy(stops = refreshCountdowns(state.stops, action.referenceTime))
             }
             is ArrivalsAction.Refresh -> {
                 when (state) {
@@ -157,6 +191,196 @@ class ArrivalsEngine {
                 }
             }
         }
+    }
+
+    private fun normalize(
+        dto: GolemioDepartureBoardResponse,
+        referenceTime: Instant
+    ): List<Stop> {
+        val stopsByIdOrName = dto.stops.associateBy { it.stopId }
+
+        val departuresByStop = dto.departures.groupBy { dep ->
+            stopsByIdOrName[dep.stop.id]?.stopName?.ifEmpty { null }
+                ?: dep.stop.name.ifEmpty { null }
+                ?: dto.stops.firstOrNull()?.stopName
+                ?: "Zastávka"
+        }
+
+        val allStopNames = (departuresByStop.keys + dto.stops.mapNotNull { it.stopName.ifEmpty { null } })
+            .distinct()
+
+        return allStopNames.map { stopName ->
+            val stopDepartures = departuresByStop[stopName].orEmpty()
+            val stopDtosForStop = dto.stops.filter { it.stopName == stopName }
+
+            val departuresByDisplayCode = stopDepartures.groupBy { dep ->
+                val stopInfo = stopsByIdOrName[dep.stop.id]
+                val platformCode = dep.stop.platformCode?.trim()?.ifEmpty { null }
+                    ?: stopInfo?.platformCode?.trim()?.ifEmpty { null }
+                platformCode ?: "→ ${dep.trip.headsign.trim()}"
+            }
+
+            val allPlatformCodes = (
+                departuresByDisplayCode.keys +
+                    stopDtosForStop.mapIndexed { idx, pStop ->
+                        pStop.platformCode?.trim()?.ifEmpty { null }
+                            ?: if (departuresByDisplayCode.isEmpty()) ('A' + idx).toString() else null
+                    }.filterNotNull()
+                ).distinct()
+
+            val platforms = allPlatformCodes.map { displayCode ->
+                val platformDepartures = departuresByDisplayCode[displayCode].orEmpty()
+                val matchingStopDto = platformDepartures.firstNotNullOfOrNull { stopsByIdOrName[it.stop.id] }
+                    ?: stopDtosForStop.firstOrNull { it.platformCode?.trim() == displayCode }
+                    ?: stopDtosForStop.firstOrNull()
+
+                val platformId = matchingStopDto?.stopId
+                    ?: platformDepartures.firstOrNull()?.stop?.id?.ifEmpty { null }
+                    ?: displayCode
+
+                val normalizedDepartures = platformDepartures.mapNotNull { depDto ->
+                    normalizeDeparture(depDto, referenceTime)
+                }.filter { dep ->
+                    Duration.between(referenceTime, dep.predictedTime).seconds >= -30
+                }.sortedBy { it.predictedTime }
+
+                Platform(
+                    id = platformId,
+                    code = displayCode,
+                    lat = matchingStopDto?.stopLat ?: 0.0,
+                    lon = matchingStopDto?.stopLon ?: 0.0,
+                    departures = normalizedDepartures
+                )
+            }.sortedBy { it.code }
+
+            val primaryStopInfo = stopDepartures.firstNotNullOfOrNull { stopsByIdOrName[it.stop.id] }
+                ?: stopDtosForStop.firstOrNull()
+            val avgLat = if (stopDtosForStop.isNotEmpty()) {
+                stopDtosForStop.map { it.stopLat }.average()
+            } else {
+                primaryStopInfo?.stopLat ?: platforms.firstOrNull()?.lat ?: 0.0
+            }
+            val avgLon = if (stopDtosForStop.isNotEmpty()) {
+                stopDtosForStop.map { it.stopLon }.average()
+            } else {
+                primaryStopInfo?.stopLon ?: platforms.firstOrNull()?.lon ?: 0.0
+            }
+
+            Stop(
+                id = primaryStopInfo?.stopId ?: stopName,
+                name = primaryStopInfo?.stopName ?: stopName,
+                lat = avgLat,
+                lon = avgLon,
+                distanceMeters = null,
+                platforms = platforms
+            )
+        }
+    }
+
+    private fun normalizeDeparture(
+        depDto: GolemioDepartureDto,
+        referenceTime: Instant
+    ): Departure? {
+        val scheduledInstant = parseTimestamp(depDto.departureTimestamp.scheduled) ?: return null
+        val predictedInstant = depDto.departureTimestamp.predicted?.let { parseTimestamp(it) } ?: scheduledInstant
+
+        val countdown = computeCountdown(predictedInstant, referenceTime)
+
+        val delayMinutes = depDto.delay.minutes ?: calculateDelayMinutes(scheduledInstant, predictedInstant)
+        val delay = Delay(
+            minutes = maxOf(0, delayMinutes),
+            isAvailable = depDto.delay.isAvailable || depDto.departureTimestamp.predicted != null
+        )
+
+        val transportMode = resolveTransportMode(depDto.route.type)
+
+        return Departure(
+            id = "${depDto.stop.id}_${depDto.route.shortName}_${predictedInstant.toEpochMilli()}",
+            line = Line(
+                name = depDto.route.shortName,
+                transportMode = transportMode
+            ),
+            headsign = depDto.trip.headsign,
+            scheduledTime = scheduledInstant,
+            predictedTime = predictedInstant,
+            countdown = countdown,
+            delay = delay,
+            isWheelchairAccessible = depDto.trip.isWheelchairAccessible ?: false
+        )
+    }
+
+    private fun computeCountdown(
+        predictedInstant: Instant,
+        referenceTime: Instant
+    ): CountdownDisplay {
+        val diffSeconds = Duration.between(referenceTime, predictedInstant).seconds
+        if (diffSeconds < 45) {
+            return CountdownDisplay(
+                minutesRemaining = 0,
+                displayText = "<1 min",
+                isClockTime = false
+            )
+        }
+
+        val diffMinutes = (diffSeconds + 30) / 60
+        return if (diffMinutes <= 30) {
+            CountdownDisplay(
+                minutesRemaining = diffMinutes,
+                displayText = "$diffMinutes min",
+                isClockTime = false
+            )
+        } else {
+            val zonedDateTime = predictedInstant.atZone(zoneId)
+            CountdownDisplay(
+                minutesRemaining = diffMinutes,
+                displayText = clockTimeFormatter.format(zonedDateTime),
+                isClockTime = true
+            )
+        }
+    }
+
+    private fun refreshCountdowns(
+        stops: List<Stop>,
+        referenceTime: Instant
+    ): List<Stop> {
+        return stops.map { stop ->
+            val updatedPlatforms = stop.platforms.map { platform ->
+                val updatedDepartures = platform.departures
+                    .filter { dep -> Duration.between(referenceTime, dep.predictedTime).seconds >= -30 }
+                    .map { dep -> dep.copy(countdown = computeCountdown(dep.predictedTime, referenceTime)) }
+                platform.copy(departures = updatedDepartures)
+            }
+            stop.copy(platforms = updatedPlatforms)
+        }
+    }
+
+    private fun resolveTransportMode(type: Int): TransportMode {
+        return when (type) {
+            0 -> TransportMode.Tram
+            1 -> TransportMode.Metro
+            2 -> TransportMode.Train
+            3 -> TransportMode.Bus
+            11 -> TransportMode.Trolleybus
+            else -> TransportMode.Bus
+        }
+    }
+
+    private fun parseTimestamp(raw: String): Instant? {
+        if (raw.isBlank()) return null
+        return try {
+            OffsetDateTime.parse(raw).toInstant()
+        } catch (e: Exception) {
+            try {
+                Instant.parse(raw)
+            } catch (e2: Exception) {
+                null
+            }
+        }
+    }
+
+    private fun calculateDelayMinutes(scheduled: Instant, predicted: Instant): Int {
+        val diff = Duration.between(scheduled, predicted).toMinutes().toInt()
+        return maxOf(0, diff)
     }
 
     fun calculateDistanceMeters(
