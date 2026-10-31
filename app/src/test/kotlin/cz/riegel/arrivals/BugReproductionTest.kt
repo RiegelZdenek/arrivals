@@ -3,6 +3,7 @@ package cz.riegel.arrivals
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import cz.riegel.arrivals.data.DeparturesRepository
+import cz.riegel.arrivals.data.FakeTransitDataSource
 import cz.riegel.arrivals.data.InMemoryDeparturesRepository
 import cz.riegel.arrivals.data.LocationResolution
 import cz.riegel.arrivals.data.StopRegistry
@@ -17,6 +18,7 @@ import cz.riegel.arrivals.domain.ArrivalsAction
 import cz.riegel.arrivals.domain.ArrivalsEngine
 import cz.riegel.arrivals.domain.ArrivalsViewState
 import cz.riegel.arrivals.domain.model.Coordinates
+import cz.riegel.arrivals.widget.ArrivalsUpdateWorker
 import cz.riegel.arrivals.widget.WidgetStateManager
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -35,7 +37,7 @@ class BugReproductionTest {
     @Test
     fun bug1_stopRegistry_lipanskaHasCorrectUtf8Encoding() {
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val registry = StopRegistry(context)
+        val registry = StopRegistry.create(context)
 
         // Coordinates right at Lipanská (50.08396, 14.45343)
         val closest = registry.findClosestStop(50.08396, 14.45343)
@@ -176,5 +178,26 @@ class BugReproductionTest {
         assertEquals("26", stateAfterC.activeDepartures.first().line.name)
         assertEquals("6 min", stateAfterC.activeDepartures.first().countdown.displayText)
         assertEquals(stateAfterC.activePlatform?.distanceMeters, stateAfterC.activeDistanceMeters)
+    }
+
+    @Test
+    fun workerAdaptiveRadius_expandsUntilNonEmptyResponseViaFakeTransitDataSource() = runTest {
+        val fakeDataSource = FakeTransitDataSource()
+        val coords = Coordinates(50.08396, 14.45343)
+        val nonEmptyDto = GolemioDepartureBoardResponse(
+            stops = listOf(GolemioStopDto(stopId = "S1", stopName = "Lipanská", platformCode = "A", stopLat = 50.08391, stopLon = 14.45371))
+        )
+        fakeDataSource.setResponseForRadius(100, Result.success(GolemioDepartureBoardResponse()))
+        fakeDataSource.setResponseForRadius(250, Result.success(nonEmptyDto))
+
+        val result = ArrivalsUpdateWorker.fetchWithAdaptiveRadius(
+            transitDataSource = fakeDataSource,
+            userCoordinates = coords,
+            preferredRadius = 100
+        )
+
+        assertTrue(result.isSuccess)
+        assertEquals(1, result.getOrThrow().stops.size)
+        assertEquals(listOf(100, 250), fakeDataSource.nearbyCalls.map { it.radiusMeters })
     }
 }

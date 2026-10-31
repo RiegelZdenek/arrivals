@@ -1,7 +1,9 @@
 package cz.riegel.arrivals.data
 
+import android.content.Context
 import cz.riegel.arrivals.data.model.GolemioDepartureBoardResponse
 import cz.riegel.arrivals.data.model.GolemioException
+import cz.riegel.arrivals.domain.model.Coordinates
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -9,30 +11,33 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+import java.io.InputStream
 import java.util.concurrent.TimeUnit
 
 class GolemioApiClient(
     private val baseUrl: String = "https://api.golemio.cz/v2/pid/departureboards",
     private val apiKeyProvider: () -> String?,
     private val okHttpClient: OkHttpClient = defaultOkHttpClient(),
-    private val stopRegistry: StopRegistry = StopRegistry()
-) {
+    private val stopsStreamProvider: (() -> InputStream)? = null,
+    private val stopRegistry: StopRegistry = StopRegistry(stopsStreamProvider)
+) : TransitDataSource {
+
     private val json = Json {
         ignoreUnknownKeys = true
         isLenient = true
         coerceInputValues = true
     }
 
-    suspend fun getDeparturesByNames(
-        names: List<String>,
-        limit: Int = 20
+    override suspend fun fetchDeparturesForStops(
+        stopNames: List<String>,
+        limit: Int
     ): Result<GolemioDepartureBoardResponse> = withContext(Dispatchers.IO) {
         val apiKey = apiKeyProvider()
         if (apiKey.isNullOrBlank()) {
             return@withContext Result.failure(GolemioException.MissingApiKey)
         }
 
-        if (names.isEmpty()) {
+        if (stopNames.isEmpty()) {
             return@withContext Result.success(GolemioDepartureBoardResponse())
         }
 
@@ -42,7 +47,7 @@ class GolemioApiClient(
         val urlBuilder = baseHttpUrl.newBuilder()
             .addQueryParameter("limit", limit.toString())
 
-        names.forEach { name ->
+        stopNames.forEach { name ->
             urlBuilder.addQueryParameter("names", name)
         }
 
@@ -55,28 +60,30 @@ class GolemioApiClient(
         executeRequest(request)
     }
 
-    suspend fun getDepartures(
-        lat: Double,
-        lon: Double,
-        radiusMeters: Int = 300,
-        limit: Int = 20
+    override suspend fun fetchNearbyDepartures(
+        coordinates: Coordinates,
+        radiusMeters: Int,
+        limit: Int
     ): Result<GolemioDepartureBoardResponse> = withContext(Dispatchers.IO) {
         val apiKey = apiKeyProvider()
         if (apiKey.isNullOrBlank()) {
             return@withContext Result.failure(GolemioException.MissingApiKey)
         }
 
-        val nearbyStopNames = stopRegistry.findNearbyStopNames(lat, lon, radiusMeters)
+        val nearbyStopNames = stopRegistry.findNearbyStopNames(
+            userLat = coordinates.lat,
+            userLon = coordinates.lon,
+            radiusMeters = radiusMeters
+        )
         if (nearbyStopNames.isEmpty()) {
-            // Also attempt direct lat/lng parameters if supported
             val baseHttpUrl = baseUrl.toHttpUrlOrNull()
                 ?: return@withContext Result.failure(IllegalArgumentException("Invalid base URL: $baseUrl"))
 
             val request = Request.Builder()
                 .url(
                     baseHttpUrl.newBuilder()
-                        .addQueryParameter("lat", lat.toString())
-                        .addQueryParameter("lng", lon.toString())
+                        .addQueryParameter("lat", coordinates.lat.toString())
+                        .addQueryParameter("lng", coordinates.lon.toString())
                         .addQueryParameter("range", radiusMeters.toString())
                         .addQueryParameter("limit", limit.toString())
                         .build()
@@ -88,7 +95,7 @@ class GolemioApiClient(
             return@withContext executeRequest(request)
         }
 
-        getDeparturesByNames(nearbyStopNames, limit)
+        fetchDeparturesForStops(nearbyStopNames, limit)
     }
 
     private fun executeRequest(request: Request): Result<GolemioDepartureBoardResponse> {
@@ -116,6 +123,21 @@ class GolemioApiClient(
     }
 
     companion object {
+        fun create(
+            context: Context,
+            apiKeyProvider: () -> String?,
+            baseUrl: String = "https://api.golemio.cz/v2/pid/departureboards",
+            okHttpClient: OkHttpClient = defaultOkHttpClient()
+        ): GolemioApiClient {
+            val appContext = context.applicationContext ?: context
+            return GolemioApiClient(
+                baseUrl = baseUrl,
+                apiKeyProvider = apiKeyProvider,
+                okHttpClient = okHttpClient,
+                stopsStreamProvider = { appContext.assets.open("stops_compact.json") }
+            )
+        }
+
         fun defaultOkHttpClient(): OkHttpClient {
             return OkHttpClient.Builder()
                 .connectTimeout(10, TimeUnit.SECONDS)

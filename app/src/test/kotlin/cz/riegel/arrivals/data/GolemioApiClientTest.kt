@@ -1,22 +1,22 @@
 package cz.riegel.arrivals.data
 
-import cz.riegel.arrivals.data.model.GolemioDepartureBoardResponse
 import cz.riegel.arrivals.data.model.GolemioException
+import cz.riegel.arrivals.domain.model.Coordinates
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.ByteArrayInputStream
 
 class GolemioApiClientTest {
 
     private lateinit var mockWebServer: MockWebServer
-    private lateinit var apiClient: GolemioApiClient
+    private lateinit var apiClient: TransitDataSource
 
     private val sampleJson = """
     {
@@ -87,7 +87,7 @@ class GolemioApiClientTest {
     }
 
     @Test
-    fun getDepartures_sendsRequiredHeaderAndQueryParams_andParsesResponse() = runBlocking {
+    fun fetchNearbyDepartures_sendsRequiredHeaderAndQueryParams_andParsesResponse() = runBlocking {
         mockWebServer.enqueue(
             MockResponse()
                 .setResponseCode(200)
@@ -95,7 +95,11 @@ class GolemioApiClientTest {
                 .setBody(sampleJson)
         )
 
-        val result = apiClient.getDepartures(lat = 50.0755, lon = 14.4302, radiusMeters = 300, limit = 10)
+        val result = apiClient.fetchNearbyDepartures(
+            coordinates = Coordinates(lat = 50.0755, lon = 14.4302),
+            radiusMeters = 300,
+            limit = 10
+        )
 
         assertTrue("Expected successful result", result.isSuccess)
         val response = result.getOrThrow()
@@ -118,7 +122,15 @@ class GolemioApiClientTest {
     }
 
     @Test
-    fun getDeparturesByNames_sendsNamesParam() = runBlocking {
+    fun fetchNearbyDepartures_resolvesUtf8PragueStopsFromInjectedStream() = runBlocking {
+        val utf8StopsJson = "\uFEFF[{\"n\":\"Lipanská\",\"lat\":50.08396,\"lon\":14.45343},{\"n\":\"Jiřího z Poděbrad\",\"lat\":50.0778,\"lon\":14.4504}]"
+        val customClient: TransitDataSource = GolemioApiClient(
+            baseUrl = mockWebServer.url("/v2/pid/departureboards").toString(),
+            apiKeyProvider = { "test-api-token-12345" },
+            okHttpClient = OkHttpClient.Builder().build(),
+            stopsStreamProvider = { ByteArrayInputStream(utf8StopsJson.toByteArray(Charsets.UTF_8)) }
+        )
+
         mockWebServer.enqueue(
             MockResponse()
                 .setResponseCode(200)
@@ -126,7 +138,29 @@ class GolemioApiClientTest {
                 .setBody(sampleJson)
         )
 
-        val result = apiClient.getDeparturesByNames(listOf("Hlavní nádraží"), limit = 1)
+        val result = customClient.fetchNearbyDepartures(
+            coordinates = Coordinates(lat = 50.08396, lon = 14.45343),
+            radiusMeters = 300,
+            limit = 15
+        )
+        assertTrue(result.isSuccess)
+
+        val recordedRequest = mockWebServer.takeRequest()
+        val requestUrl = recordedRequest.requestUrl!!
+        assertEquals("15", requestUrl.queryParameter("limit"))
+        assertEquals(listOf("Lipanská"), requestUrl.queryParameterValues("names"))
+    }
+
+    @Test
+    fun fetchDeparturesForStops_sendsNamesParam() = runBlocking {
+        mockWebServer.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
+                .setBody(sampleJson)
+        )
+
+        val result = apiClient.fetchDeparturesForStops(listOf("Hlavní nádraží"), limit = 1)
         assertTrue(result.isSuccess)
 
         val recordedRequest = mockWebServer.takeRequest()
@@ -136,7 +170,7 @@ class GolemioApiClientTest {
     }
 
     @Test
-    fun getDepartures_handlesStringLessThanOneMinute() = runBlocking {
+    fun fetchDeparturesForStops_handlesStringLessThanOneMinute() = runBlocking {
         val stringMinutesJson = """
         {
           "stops": [],
@@ -163,7 +197,7 @@ class GolemioApiClientTest {
                 .setBody(stringMinutesJson)
         )
 
-        val result = apiClient.getDeparturesByNames(listOf("Hlavní nádraží"), limit = 1)
+        val result = apiClient.fetchDeparturesForStops(listOf("Hlavní nádraží"), limit = 1)
         assertTrue(result.isSuccess)
         val response = result.getOrThrow()
         assertEquals(1, response.departures.size)
@@ -171,10 +205,10 @@ class GolemioApiClientTest {
     }
 
     @Test
-    fun getDepartures_handlesHttp401Unauthorized() = runBlocking {
+    fun fetchNearbyDepartures_handlesHttp401Unauthorized() = runBlocking {
         mockWebServer.enqueue(MockResponse().setResponseCode(401))
 
-        val result = apiClient.getDepartures(50.0, 14.0)
+        val result = apiClient.fetchNearbyDepartures(Coordinates(50.0, 14.0), radiusMeters = 300)
 
         assertTrue(result.isFailure)
         val error = result.exceptionOrNull()
@@ -182,10 +216,10 @@ class GolemioApiClientTest {
     }
 
     @Test
-    fun getDepartures_handlesHttp429RateLimit() = runBlocking {
+    fun fetchNearbyDepartures_handlesHttp429RateLimit() = runBlocking {
         mockWebServer.enqueue(MockResponse().setResponseCode(429))
 
-        val result = apiClient.getDepartures(50.0, 14.0)
+        val result = apiClient.fetchNearbyDepartures(Coordinates(50.0, 14.0), radiusMeters = 300)
 
         assertTrue(result.isFailure)
         val error = result.exceptionOrNull()

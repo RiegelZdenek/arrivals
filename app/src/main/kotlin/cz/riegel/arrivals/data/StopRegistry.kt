@@ -1,10 +1,10 @@
 package cz.riegel.arrivals.data
 
 import android.content.Context
-import cz.riegel.arrivals.domain.ArrivalsEngine
 import cz.riegel.arrivals.domain.model.Coordinates
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.io.InputStream
 
 @Serializable
 data class CompactStop(
@@ -13,8 +13,9 @@ data class CompactStop(
     val lon: Double
 )
 
-class StopRegistry(private val context: Context? = null) {
-    private val engine = ArrivalsEngine()
+class StopRegistry(
+    private val stopsStreamProvider: (() -> InputStream)? = null
+) {
     private val json = Json { ignoreUnknownKeys = true }
 
     private val stops: List<CompactStop> by lazy {
@@ -22,9 +23,9 @@ class StopRegistry(private val context: Context? = null) {
     }
 
     private fun loadStops(): List<CompactStop> {
-        val assetManager = context?.assets ?: return defaultPragueHubs
+        val provider = stopsStreamProvider ?: return defaultPragueHubs
         return try {
-            assetManager.open("stops_compact.json").use { stream ->
+            provider().use { stream ->
                 val content = stream.bufferedReader(Charsets.UTF_8).readText().removePrefix("\uFEFF")
                 json.decodeFromString<List<CompactStop>>(content)
             }
@@ -37,7 +38,7 @@ class StopRegistry(private val context: Context? = null) {
         val userCoords = Coordinates(userLat, userLon)
         return stops.asSequence()
             .map { stop ->
-                val dist = engine.calculateDistanceMeters(userCoords, Coordinates(stop.lat, stop.lon))
+                val dist = userCoords.distanceTo(Coordinates(stop.lat, stop.lon))
                 stop.n to dist
             }
             .filter { (_, dist) -> dist <= radiusMeters }
@@ -53,13 +54,20 @@ class StopRegistry(private val context: Context? = null) {
         val userCoords = Coordinates(userLat, userLon)
         return stops.asSequence()
             .map { stop ->
-                val dist = engine.calculateDistanceMeters(userCoords, Coordinates(stop.lat, stop.lon))
+                val dist = userCoords.distanceTo(Coordinates(stop.lat, stop.lon))
                 stop to dist
             }
             .minByOrNull { it.second }
     }
 
     companion object {
+        fun create(context: Context): StopRegistry {
+            val appContext = context.applicationContext ?: context
+            return StopRegistry(
+                stopsStreamProvider = { appContext.assets.open("stops_compact.json") }
+            )
+        }
+
         fun isWithinPragueCoverage(lat: Double, lon: Double): Boolean {
             return lat in 49.70..50.50 && lon in 14.00..15.00
         }

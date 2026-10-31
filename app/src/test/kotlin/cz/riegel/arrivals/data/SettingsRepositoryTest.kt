@@ -58,8 +58,40 @@ class SettingsRepositoryTest {
 
     @Test
     fun validateApiKey_failsOnBlankKey() = runBlocking {
-        val result = settingsRepository.validateApiKey("   ")
+        val fakeDataSource = FakeTransitDataSource()
+        val result = settingsRepository.validateApiKey("   ") { fakeDataSource }
         assertTrue(result.isFailure)
         assertTrue(result.exceptionOrNull() is GolemioException.MissingApiKey)
+        assertTrue(fakeDataSource.stopsCalls.isEmpty())
+    }
+
+    @Test
+    fun validateApiKey_queriesHlavniNadraziThroughTransitDataSource_andSucceedsWhenValid() = runBlocking {
+        val fakeDataSource = FakeTransitDataSource()
+        fakeDataSource.setResponseForStop("Hlavní nádraží", Result.success(GolemioDepartureBoardResponse()))
+        var passedToken: String? = null
+
+        val result = settingsRepository.validateApiKey("valid-token") { token ->
+            passedToken = token
+            fakeDataSource
+        }
+
+        assertTrue(result.isSuccess)
+        assertEquals(true, result.getOrNull())
+        assertEquals("valid-token", passedToken)
+        assertEquals(1, fakeDataSource.stopsCalls.size)
+        assertEquals(listOf("Hlavní nádraží"), fakeDataSource.stopsCalls.first().stopNames)
+        assertEquals(1, fakeDataSource.stopsCalls.first().limit)
+    }
+
+    @Test
+    fun validateApiKey_propagatesUnauthorizedFailureFromTransitDataSource() = runBlocking {
+        val fakeDataSource = FakeTransitDataSource()
+        fakeDataSource.setResponseForStop("Hlavní nádraží", Result.failure(GolemioException.Unauthorized))
+
+        val result = settingsRepository.validateApiKey("bad-token") { fakeDataSource }
+
+        assertTrue(result.isFailure)
+        assertTrue(result.exceptionOrNull() is GolemioException.Unauthorized)
     }
 }

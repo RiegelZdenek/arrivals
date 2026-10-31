@@ -60,13 +60,18 @@ class SettingsRepository(context: Context) {
         prefs.edit().clear().apply()
     }
 
-    suspend fun validateApiKey(key: String): Result<Boolean> {
-        if (key.isBlank()) {
+    suspend fun validateApiKey(
+        key: String,
+        transitDataSourceFactory: (String) -> TransitDataSource = { token ->
+            GolemioApiClient(apiKeyProvider = { token })
+        }
+    ): Result<Boolean> {
+        val trimmed = key.trim()
+        if (trimmed.isBlank()) {
             return Result.failure(GolemioException.MissingApiKey)
         }
-        val testClient = GolemioApiClient(apiKeyProvider = { key })
-        // Test query against Golemio with a well-known Prague stop
-        val result = testClient.getDeparturesByNames(listOf("Hlavní nádraží"), limit = 1)
+        val dataSource = transitDataSourceFactory(trimmed)
+        val result = dataSource.fetchDeparturesForStops(listOf("Hlavní nádraží"), limit = 1)
         return if (result.isSuccess) {
             Result.success(true)
         } else {

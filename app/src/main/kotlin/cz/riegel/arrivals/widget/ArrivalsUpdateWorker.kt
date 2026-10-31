@@ -20,7 +20,8 @@ import cz.riegel.arrivals.data.DeparturesRepository
 import cz.riegel.arrivals.data.GolemioApiClient
 import cz.riegel.arrivals.data.LocationResolution
 import cz.riegel.arrivals.data.SettingsRepository
-import cz.riegel.arrivals.data.StopRegistry
+import cz.riegel.arrivals.data.TransitDataSource
+import cz.riegel.arrivals.data.model.GolemioDepartureBoardResponse
 import cz.riegel.arrivals.domain.ArrivalsAction
 import cz.riegel.arrivals.domain.ArrivalsEngine
 import cz.riegel.arrivals.domain.ArrivalsViewState
@@ -54,10 +55,7 @@ class ArrivalsUpdateWorker(
             WidgetStateManager.updateAllWidgets(appContext)
         }
 
-        val apiClient = GolemioApiClient(
-            apiKeyProvider = { apiKey },
-            stopRegistry = StopRegistry(appContext)
-        )
+        val transitDataSource = transitDataSourceFactory(appContext) { apiKey }
         val now = Instant.now()
 
         // 1. Resolve coordinates (High-Accuracy GPS or 30-min underground fallback per ADR-0003)
@@ -75,34 +73,16 @@ class ArrivalsUpdateWorker(
 
         // 2. Fetch live departures with adaptive radius expansion
         val preferredRadius = settingsRepository.getSearchRadius()
-        val searchRadii = listOf(preferredRadius) + engine.adaptiveSearchRadii.filter { it != preferredRadius }
+        val fetchResult = fetchWithAdaptiveRadius(
+            transitDataSource = transitDataSource,
+            userCoordinates = userCoords,
+            preferredRadius = preferredRadius,
+            adaptiveRadii = engine.adaptiveSearchRadii,
+            limit = 60
+        )
 
-        var apiSuccessResponse: cz.riegel.arrivals.data.model.GolemioDepartureBoardResponse? = null
-        var lastError: Throwable? = null
-
-        for (radius in searchRadii) {
-            val responseResult = apiClient.getDepartures(
-                lat = userCoords.lat,
-                lon = userCoords.lon,
-                radiusMeters = radius,
-                limit = 60
-            )
-
-            if (responseResult.isSuccess) {
-                val data = responseResult.getOrThrow()
-                if (data.departures.isNotEmpty() || data.stops.isNotEmpty()) {
-                    apiSuccessResponse = data
-                    break
-                } else if (apiSuccessResponse == null) {
-                    apiSuccessResponse = data
-                }
-            } else {
-                lastError = responseResult.exceptionOrNull()
-                break
-            }
-        }
-
-        if (apiSuccessResponse != null) {
+        if (fetchResult.isSuccess) {
+            val apiSuccessResponse = fetchResult.getOrThrow()
             departuresRepository.saveDepartures(apiSuccessResponse, now)
 
             val warningBanner = (locationResolution as? LocationResolution.UndergroundFallback)?.warningBanner
@@ -123,7 +103,11 @@ class ArrivalsUpdateWorker(
         }
 
         // 3. Network or Rate Limit failure resilience: fall back to cached departures
-        restoreCachedDepartures(now = now, userCoords = userCoords, fallbackErrorMessage = lastError?.message)
+        restoreCachedDepartures(
+            now = now,
+            userCoords = userCoords,
+            fallbackErrorMessage = fetchResult.exceptionOrNull()?.message
+        )
         return Result.success()
     }
 
@@ -232,6 +216,48 @@ class ArrivalsUpdateWorker(
     companion object {
         const val WORK_NAME_PERIODIC = "arrivals_periodic_update"
         const val WORK_NAME_ONE_TIME = "arrivals_one_time_update"
+
+        internal var transitDataSourceFactory: (Context, () -> String?) -> TransitDataSource =
+            { context, apiKeyProvider -> GolemioApiClient.create(context, apiKeyProvider) }
+
+        suspend fun fetchWithAdaptiveRadius(
+            transitDataSource: TransitDataSource,
+            userCoordinates: Coordinates,
+            preferredRadius: Int,
+            adaptiveRadii: List<Int> = ArrivalsEngine().adaptiveSearchRadii,
+            limit: Int = 60
+        ): kotlin.Result<GolemioDepartureBoardResponse> {
+            val searchRadii = listOf(preferredRadius) + adaptiveRadii.filter { it != preferredRadius }
+            var apiSuccessResponse: GolemioDepartureBoardResponse? = null
+            var lastError: Throwable? = null
+
+            for (radius in searchRadii) {
+                val responseResult = transitDataSource.fetchNearbyDepartures(
+                    coordinates = userCoordinates,
+                    radiusMeters = radius,
+                    limit = limit
+                )
+
+                if (responseResult.isSuccess) {
+                    val data = responseResult.getOrThrow()
+                    if (data.departures.isNotEmpty() || data.stops.isNotEmpty()) {
+                        apiSuccessResponse = data
+                        break
+                    } else if (apiSuccessResponse == null) {
+                        apiSuccessResponse = data
+                    }
+                } else {
+                    lastError = responseResult.exceptionOrNull()
+                    break
+                }
+            }
+
+            return if (apiSuccessResponse != null) {
+                kotlin.Result.success(apiSuccessResponse)
+            } else {
+                kotlin.Result.failure(lastError ?: Exception("Unable to fetch transit departures"))
+            }
+        }
 
         suspend fun restoreCachedDepartures(
             context: Context,

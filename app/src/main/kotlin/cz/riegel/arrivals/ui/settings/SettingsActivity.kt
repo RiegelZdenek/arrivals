@@ -73,7 +73,7 @@ class SettingsActivity : AppCompatActivity() {
         setContentView(R.layout.activity_settings)
 
         settingsRepository = SettingsRepository(this)
-        stopRegistry = StopRegistry(this)
+        stopRegistry = StopRegistry.create(this)
 
         editApiKey = findViewById(R.id.editApiKey)
         editRadius = findViewById(R.id.editRadius)

@@ -1,11 +1,26 @@
 package cz.riegel.arrivals.domain.model
 
 import java.time.Instant
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.sin
+import kotlin.math.sqrt
 
 data class Coordinates(
     val lat: Double,
     val lon: Double
-)
+) {
+    fun distanceTo(other: Coordinates): Int {
+        val earthRadius = 6371000.0 // meters
+        val dLat = Math.toRadians(other.lat - lat)
+        val dLon = Math.toRadians(other.lon - lon)
+        val a = sin(dLat / 2) * sin(dLat / 2) +
+                cos(Math.toRadians(lat)) * cos(Math.toRadians(other.lat)) *
+                sin(dLon / 2) * sin(dLon / 2)
+        val c = 2 * atan2(sqrt(a), sqrt(1 - a))
+        return (earthRadius * c).toInt()
+    }
+}
 
 enum class TransportMode(val symbol: String) {
     Metro("M"),
