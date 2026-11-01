@@ -50,6 +50,17 @@
             android:textColorHint="#606060"
             android:textSize="14sp" />
 
+        <TextView
+            android:id="@+id/textApiKeyHelp"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:autoLink="web"
+            android:text="@string/api_token_help"
+            android:textColor="#A0A0A0"
+            android:textColorLink="#81B0FF"
+            android:textSize="12sp" />
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
