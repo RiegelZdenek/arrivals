@@ -4,8 +4,6 @@ An Android home screen widget built with Jetpack Glance that serves as an automa
 
 It detects your nearest transit stop, identifies individual platforms, and provides real-time departure countdowns with live vehicle delays—all at a glance without having to unlock your phone and launch a full transit application.
 
-![Design Preview](design_idea.png)
-
 ---
 
 ## Key Features
