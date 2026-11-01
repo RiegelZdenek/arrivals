@@ -581,8 +581,11 @@ fun PlatformPickerList(state: ArrivalsViewState.Content) {
     val context = LocalContext.current
     val noDeparturesText = context.getString(R.string.no_departures)
 
-    Column(modifier = GlanceModifier.fillMaxSize()) {
-        state.platformPickerRows.forEach { row ->
+    LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
+        items(
+            items = state.platformPickerRows,
+            itemId = { it.code.hashCode().toLong() }
+        ) { row ->
             val rowBg = if (row.isSelected) Color(0xFF2C3548) else Color(0xFF1E1D24)
             val pillBg = if (row.isSelected) Color.White else Color(0xFF2C2A34)
             val pillTextColor = if (row.isSelected) Color.Black else Color.White

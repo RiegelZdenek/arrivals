@@ -584,4 +584,52 @@ class ArrivalsWidgetIntegrationTest {
         assertEquals("Stop 8", state.activeStop.name)
         assertEquals(8, DeparturesRepository.create(context).getActiveStopIndex())
     }
+
+    @Test
+    fun platformPicker_withTenPlusPlatforms_rendersAllPlatformsAndAllowsSelectingOverflowingItem() = runBlocking {
+        // Create a stop with 12 platforms (10+ platforms)
+        val platformCodes = (1..12).map { "$it" }
+        val stop = sampleStop(
+            id = "stop_main",
+            name = "Main Station",
+            platforms = platformCodes
+        )
+
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(stop),
+                activeStopIndex = 0,
+                activePlatformCode = "1",
+                userCoordinates = Coordinates(50.075, 14.430)
+            )
+        )
+
+        // Open platform picker -> PlatformPicker mode
+        WidgetStateManager.onOpenPlatformPicker(context)
+        var state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
+        assertEquals(PickerMode.PlatformPicker, state.pickerMode)
+
+        // Verify all 10+ platforms render in platformPickerRows
+        val rows = state.platformPickerRows
+        assertEquals(12, rows.size)
+        rows.forEachIndexed { i, row ->
+            val expectedCode = "${i + 1}"
+            assertEquals(expectedCode, row.code)
+            if (i == 0) {
+                assertTrue(row.isSelected)
+            } else {
+                assertFalse(row.isSelected)
+            }
+        }
+
+        // Select an overflowing item (e.g. index 8 -> code "9")
+        WidgetStateManager.onSelectPlatform(context, "9")
+
+        // Verify active platform state updates, selection persists, and returns to PickerMode.Departures
+        state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
+        assertEquals(PickerMode.Departures, state.pickerMode)
+        assertEquals("9", state.activePlatformCode)
+        assertEquals("9", DeparturesRepository.create(context).getActivePlatformCode())
+    }
 }
