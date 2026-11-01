@@ -141,3 +141,9 @@ The test suite covers:
 - [ADR 0001: Direct Golemio API Integration](docs/adr/0001-direct-golemio-client.md)
 - [ADR 0002: Jetpack Glance App Widget](docs/adr/0002-jetpack-glance-ui.md)
 - [ADR 0003: Last-Known Location Fallback](docs/adr/0003-last-known-location-fallback.md)
+
+---
+
+## License
+
+This project is licensed under the GNU General Public License v3.0 (GPL-3.0) — see the [LICENSE](LICENSE) file for details.
