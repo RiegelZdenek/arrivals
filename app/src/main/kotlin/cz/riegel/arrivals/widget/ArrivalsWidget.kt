@@ -33,6 +33,8 @@ import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
 import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
+import androidx.glance.appwidget.lazy.LazyColumn
+import androidx.glance.appwidget.lazy.items
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
 import androidx.glance.currentState
@@ -517,8 +519,11 @@ fun RefreshButtonOrSpinner(isRefreshing: Boolean) {
 
 @Composable
 fun StopPickerList(state: ArrivalsViewState.Content) {
-    Column(modifier = GlanceModifier.fillMaxSize()) {
-        state.stopPickerRows.forEach { row ->
+    LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
+        items(
+            items = state.stopPickerRows,
+            itemId = { it.stopIndex.toLong() }
+        ) { row ->
             val rowBg = if (row.isSelected) Color(0xFF2C3548) else Color(0xFF1E1D24)
             val nameColor = if (row.isSelected) Color(0xFF81B0FF) else Color.White
             val selectAction = actionRunCallback<SelectStopActionCallback>(

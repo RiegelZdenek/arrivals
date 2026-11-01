@@ -534,4 +534,54 @@ class ArrivalsWidgetIntegrationTest {
         assertTrue(error.canRetry)
         assertTrue(error.message.contains("Karlovo náměstí") || error.message.contains("Unable"))
     }
+
+    @Test
+    fun stopPicker_withTenPlusStops_rendersAllStopsAndAllowsSelectingOverflowingItem() = runBlocking {
+        // Create 12 stops (10+ stops)
+        val stops = (0..11).map { index ->
+            sampleStop(
+                id = "stop_$index",
+                name = "Stop $index",
+                platforms = listOf("A", "B")
+            )
+        }
+
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = stops,
+                activeStopIndex = 0,
+                activePlatformCode = "A",
+                userCoordinates = Coordinates(50.075, 14.430)
+            )
+        )
+
+        // Open stop picker -> StopPicker mode
+        WidgetStateManager.onOpenStopPicker(context)
+        var state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
+        assertEquals(PickerMode.StopPicker, state.pickerMode)
+
+        // Verify all 10+ stops render in stopPickerRows
+        val rows = state.stopPickerRows
+        assertEquals(12, rows.size)
+        rows.forEachIndexed { i, row ->
+            assertEquals(i, row.stopIndex)
+            assertEquals("Stop $i", row.name)
+            if (i == 0) {
+                assertTrue(row.isSelected)
+            } else {
+                assertFalse(row.isSelected)
+            }
+        }
+
+        // Select an overflowing item (e.g. stop index 8)
+        WidgetStateManager.onSelectStop(context, 8)
+
+        // Verify active stop state updates, selection persists, and returns to PickerMode.Departures
+        state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
+        assertEquals(PickerMode.Departures, state.pickerMode)
+        assertEquals(8, state.activeStopIndex)
+        assertEquals("Stop 8", state.activeStop.name)
+        assertEquals(8, DeparturesRepository.create(context).getActiveStopIndex())
+    }
 }
