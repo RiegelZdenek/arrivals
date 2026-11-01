@@ -1,6 +1,7 @@
 package cz.riegel.arrivals.widget
 
 import android.content.Context
+import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import cz.riegel.arrivals.data.DeparturesRepository
 import cz.riegel.arrivals.data.model.GolemioDepartureBoardResponse
@@ -631,5 +632,73 @@ class ArrivalsWidgetIntegrationTest {
         assertEquals(PickerMode.Departures, state.pickerMode)
         assertEquals("9", state.activePlatformCode)
         assertEquals("9", DeparturesRepository.create(context).getActivePlatformCode())
+    }
+
+    @Test
+    fun departuresList_withTenPlusDepartures_retainsViewportLimitsAndStableIds() = runBlocking {
+        val departures = (1..12).map { i ->
+            Departure(
+                id = "dep_line_$i",
+                line = Line("$i", TransportMode.Tram),
+                terminus = "Terminus $i",
+                scheduledTime = Instant.now(),
+                predictedTime = Instant.now(),
+                countdown = CountdownDisplay(i.toLong(), "$i min", false),
+                delay = Delay(0, false)
+            )
+        }
+        val platform = Platform(
+            id = "p1",
+            code = "A",
+            departures = departures
+        )
+        val stop = sampleStop("s1", "I. P. Pavlova", listOf("A")).copy(platforms = listOf(platform))
+
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(stop),
+                activeStopIndex = 0,
+                activePlatformCode = "A"
+            )
+        )
+
+        val state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
+        assertEquals(12, state.activeDepartures.size)
+
+        // Viewport limit in compact mode (<180dp) is 4
+        val compactDepartures = state.visibleDepartures(isCompact = true)
+        assertEquals(4, compactDepartures.size)
+        assertEquals(listOf("dep_line_1", "dep_line_2", "dep_line_3", "dep_line_4"), compactDepartures.map { it.id })
+
+        // Viewport limit in standard mode (>=180dp) is 7
+        val standardDepartures = state.visibleDepartures(isCompact = false)
+        assertEquals(7, standardDepartures.size)
+        assertEquals((1..7).map { "dep_line_$it" }, standardDepartures.map { it.id })
+
+        // Check stable item IDs
+        standardDepartures.forEach { departure ->
+            assertEquals(departure.id.hashCode().toLong(), departureItemId(departure))
+        }
+    }
+
+    @Test
+    fun departuresList_skeletonLoading_rendersInStaticColumnWhileLoading() = runBlocking {
+        val stop = sampleStop("s1", "I. P. Pavlova", listOf("A"))
+
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(stop),
+                activeStopIndex = 0,
+                activePlatformCode = "A",
+                isLoadingDepartures = true
+            )
+        )
+
+        val state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
+        assertTrue(state.isLoadingDepartures)
+        assertEquals(2, skeletonRowCountForHeight(110.dp))
+        assertEquals(4, skeletonRowCountForHeight(180.dp))
     }
 }

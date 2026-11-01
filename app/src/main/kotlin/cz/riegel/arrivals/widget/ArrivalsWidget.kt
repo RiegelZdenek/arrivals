@@ -199,6 +199,12 @@ object PickerListDimens {
     val PLATFORM_PILL_CORNER_RADIUS = 8.dp
 }
 
+object DeparturesListDimens {
+    val ITEM_BOTTOM_SPACING = 4.dp
+}
+
+fun departureItemId(departure: Departure): Long = departure.id.hashCode().toLong()
+
 fun maxDeparturesForHeight(height: Dp): Int =
     if (height < 180.dp) {
         ArrivalsViewState.Content.COMPACT_MAX_DEPARTURES
@@ -362,10 +368,7 @@ fun ArrivalsWidgetContent(state: ArrivalsViewState) {
                                         modifier = GlanceModifier.padding(vertical = 8.dp)
                                     )
                                 } else {
-                                    departures.forEach { departure ->
-                                        DepartureRowItem(departure = departure)
-                                        Spacer(modifier = GlanceModifier.height(4.dp))
-                                    }
+                                    DeparturesList(departures = departures)
                                 }
                             }
                         }
@@ -661,6 +664,20 @@ fun PlatformPickerList(state: ArrivalsViewState.Content) {
                         DistanceBadge(distanceMeters = row.distanceMeters, action = selectAction)
                     }
                 }
+            }
+        }
+    }
+}
+
+@Composable
+fun DeparturesList(departures: List<Departure>) {
+    LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
+        items(
+            items = departures,
+            itemId = { it.id.hashCode().toLong() }
+        ) { departure ->
+            Box(modifier = GlanceModifier.fillMaxWidth().padding(bottom = 4.dp)) {
+                DepartureRowItem(departure = departure)
             }
         }
     }

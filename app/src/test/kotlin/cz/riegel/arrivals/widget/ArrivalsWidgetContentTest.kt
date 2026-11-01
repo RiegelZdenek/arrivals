@@ -260,4 +260,73 @@ class ArrivalsWidgetContentTest {
         assertEquals(listOf("T", "V"), stop.transportModeSymbols)
         assertEquals("T V", platform.transportModeSymbols.joinToString(" "))
     }
+
+    @Test
+    fun departuresList_stableItemIdsDerivedFromDepartureId() {
+        val departure1 = Departure(
+            id = "dep_line22_12345",
+            line = Line("22", TransportMode.Tram),
+            terminus = "Bílá Hora",
+            scheduledTime = Instant.now(),
+            predictedTime = Instant.now(),
+            countdown = CountdownDisplay(3, "3 min", false),
+            delay = Delay(0, false)
+        )
+        val departure2 = Departure(
+            id = "dep_line9_67890",
+            line = Line("9", TransportMode.Tram),
+            terminus = "Sídliště Řepy",
+            scheduledTime = Instant.now(),
+            predictedTime = Instant.now(),
+            countdown = CountdownDisplay(7, "7 min", false),
+            delay = Delay(0, false)
+        )
+
+        val id1 = departureItemId(departure1)
+        val id2 = departureItemId(departure2)
+
+        assertEquals("dep_line22_12345".hashCode().toLong(), id1)
+        assertEquals("dep_line9_67890".hashCode().toLong(), id2)
+        assertEquals(id1, departureItemId(departure1))
+        org.junit.Assert.assertNotEquals(id1, id2)
+    }
+
+    @Test
+    fun departuresList_viewportLimits_compactAndStandardTruncationEnforced() {
+        val departures = (1..15).map { i ->
+            Departure(
+                id = "dep_$i",
+                line = Line("$i", TransportMode.Tram),
+                terminus = "Terminus $i",
+                scheduledTime = Instant.now(),
+                predictedTime = Instant.now(),
+                countdown = CountdownDisplay(i.toLong(), "$i min", false),
+                delay = Delay(0, false)
+            )
+        }
+        val platform = Platform("p1", "A", departures = departures)
+        val stop = Stop("s1", "I. P. Pavlova", distanceMeters = 15, platforms = listOf(platform))
+        val state = ArrivalsViewState.Content(
+            stops = listOf(stop),
+            activeStopIndex = 0,
+            activePlatformCode = "A"
+        )
+
+        assertEquals(15, state.activeDepartures.size)
+
+        val compactList = state.visibleDepartures(isCompact = true)
+        assertEquals(ArrivalsViewState.Content.COMPACT_MAX_DEPARTURES, compactList.size)
+        assertEquals(4, compactList.size)
+        assertEquals(listOf("dep_1", "dep_2", "dep_3", "dep_4"), compactList.map { it.id })
+
+        val standardList = state.visibleDepartures(isCompact = false)
+        assertEquals(ArrivalsViewState.Content.STANDARD_MAX_DEPARTURES, standardList.size)
+        assertEquals(7, standardList.size)
+        assertEquals((1..7).map { "dep_$it" }, standardList.map { it.id })
+    }
+
+    @Test
+    fun departuresList_dimensionsAndSpacing() {
+        assertEquals(4.dp, DeparturesListDimens.ITEM_BOTTOM_SPACING)
+    }
 }
