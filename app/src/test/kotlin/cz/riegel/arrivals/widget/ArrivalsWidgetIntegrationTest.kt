@@ -592,7 +592,7 @@ class ArrivalsWidgetIntegrationTest {
         val platformCodes = (1..12).map { "$it" }
         val stop = sampleStop(
             id = "stop_main",
-            name = "Main Station",
+            name = "Hlavní nádraží",
             platforms = platformCodes
         )
 

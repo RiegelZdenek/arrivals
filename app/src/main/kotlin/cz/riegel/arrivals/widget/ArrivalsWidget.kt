@@ -54,6 +54,8 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import cz.riegel.arrivals.R
 import cz.riegel.arrivals.domain.ArrivalsViewState
+import cz.riegel.arrivals.domain.PlatformPickerRow
+import cz.riegel.arrivals.domain.StopPickerRow
 import cz.riegel.arrivals.domain.PickerMode
 import cz.riegel.arrivals.domain.model.Departure
 import cz.riegel.arrivals.domain.model.Platform
@@ -204,6 +206,8 @@ object DeparturesListDimens {
 }
 
 fun departureItemId(departure: Departure): Long = departure.id.hashCode().toLong()
+fun stopPickerItemId(row: StopPickerRow): Long = row.stopIndex.toLong()
+fun platformPickerItemId(row: PlatformPickerRow): Long = row.code.hashCode().toLong()
 
 fun maxDeparturesForHeight(height: Dp): Int =
     if (height < 180.dp) {
@@ -525,7 +529,7 @@ fun StopPickerList(state: ArrivalsViewState.Content) {
     LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
         items(
             items = state.stopPickerRows,
-            itemId = { it.stopIndex.toLong() }
+            itemId = { stopPickerItemId(it) }
         ) { row ->
             val rowBg = if (row.isSelected) Color(0xFF2C3548) else Color(0xFF1E1D24)
             val nameColor = if (row.isSelected) Color(0xFF81B0FF) else Color.White
@@ -587,7 +591,7 @@ fun PlatformPickerList(state: ArrivalsViewState.Content) {
     LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
         items(
             items = state.platformPickerRows,
-            itemId = { it.code.hashCode().toLong() }
+            itemId = { platformPickerItemId(it) }
         ) { row ->
             val rowBg = if (row.isSelected) Color(0xFF2C3548) else Color(0xFF1E1D24)
             val pillBg = if (row.isSelected) Color.White else Color(0xFF2C2A34)
@@ -674,9 +678,9 @@ fun DeparturesList(departures: List<Departure>) {
     LazyColumn(modifier = GlanceModifier.fillMaxSize()) {
         items(
             items = departures,
-            itemId = { it.id.hashCode().toLong() }
+            itemId = { departureItemId(it) }
         ) { departure ->
-            Box(modifier = GlanceModifier.fillMaxWidth().padding(bottom = 4.dp)) {
+            Box(modifier = GlanceModifier.fillMaxWidth().padding(bottom = DeparturesListDimens.ITEM_BOTTOM_SPACING)) {
                 DepartureRowItem(departure = departure)
             }
         }

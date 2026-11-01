@@ -329,4 +329,127 @@ class ArrivalsWidgetContentTest {
     fun departuresList_dimensionsAndSpacing() {
         assertEquals(4.dp, DeparturesListDimens.ITEM_BOTTOM_SPACING)
     }
+
+    @Test
+    fun stopPicker_stableItemIdsDerivedFromStopIndex() {
+        val stop0 = Stop("s0", "Hlavní nádraží")
+        val stop1 = Stop("s1", "I. P. Pavlova")
+        val stop2 = Stop("s2", "Karlovo náměstí")
+
+        val stateBeforeTick = ArrivalsViewState.Content(
+            stops = listOf(stop0, stop1, stop2),
+            activeStopIndex = 0,
+            activePlatformCode = ""
+        )
+        val rowsBeforeTick = stateBeforeTick.stopPickerRows
+        assertEquals(3, rowsBeforeTick.size)
+
+        // Item IDs are derived from stopIndex.toLong()
+        val idsBeforeTick = rowsBeforeTick.map { row ->
+            val id = row.stopIndex.toLong()
+            assertEquals(id, stopPickerItemId(row))
+            id
+        }
+        assertEquals(listOf(0L, 1L, 2L), idsBeforeTick)
+
+        // Uniqueness across rows
+        assertEquals(idsBeforeTick.distinct().size, idsBeforeTick.size)
+
+        // Stability across ticks/recompositions: even if active stop changes or state recomposes
+        val stateAfterTick = ArrivalsViewState.Content(
+            stops = listOf(stop0, stop1, stop2),
+            activeStopIndex = 1,
+            activePlatformCode = ""
+        )
+        val rowsAfterTick = stateAfterTick.stopPickerRows
+        val idsAfterTick = rowsAfterTick.map { stopPickerItemId(it) }
+
+        assertEquals(idsBeforeTick, idsAfterTick)
+        rowsAfterTick.forEachIndexed { index, row ->
+            assertEquals(index.toLong(), stopPickerItemId(row))
+            assertEquals(index.toLong(), row.stopIndex.toLong())
+        }
+    }
+
+    @Test
+    fun platformPicker_stableItemIdsDerivedFromPlatformCode() {
+        val platformA = Platform(
+            id = "p1",
+            code = "A",
+            departures = listOf(
+                Departure(
+                    id = "d1",
+                    line = Line("22", TransportMode.Tram),
+                    terminus = "Bílá Hora",
+                    scheduledTime = Instant.now(),
+                    predictedTime = Instant.now(),
+                    countdown = CountdownDisplay(3, "3 min", false),
+                    delay = Delay(0, false)
+                )
+            )
+        )
+        val platformB = Platform(
+            id = "p2",
+            code = "B",
+            departures = emptyList()
+        )
+        val platform1 = Platform(
+            id = "p3",
+            code = "1",
+            departures = emptyList()
+        )
+
+        val stop = Stop("s1", "I. P. Pavlova", platforms = listOf(platformA, platformB, platform1))
+
+        val stateBeforeTick = ArrivalsViewState.Content(
+            stops = listOf(stop),
+            activeStopIndex = 0,
+            activePlatformCode = "A"
+        )
+        val rowsBeforeTick = stateBeforeTick.platformPickerRows
+        assertEquals(3, rowsBeforeTick.size)
+
+        // Item IDs are derived from code.hashCode().toLong()
+        val idsBeforeTick = rowsBeforeTick.map { row ->
+            val id = row.code.hashCode().toLong()
+            assertEquals(id, platformPickerItemId(row))
+            id
+        }
+        assertEquals(
+            listOf("A".hashCode().toLong(), "B".hashCode().toLong(), "1".hashCode().toLong()),
+            idsBeforeTick
+        )
+
+        // Uniqueness across platform codes
+        assertEquals(idsBeforeTick.distinct().size, idsBeforeTick.size)
+
+        // Stability across ticks/recompositions: departure countdowns tick and selection updates
+        val updatedPlatformA = platformA.copy(
+            departures = listOf(
+                Departure(
+                    id = "d1",
+                    line = Line("22", TransportMode.Tram),
+                    terminus = "Bílá Hora",
+                    scheduledTime = Instant.now(),
+                    predictedTime = Instant.now(),
+                    countdown = CountdownDisplay(2, "2 min", false),
+                    delay = Delay(1, true)
+                )
+            )
+        )
+        val updatedStop = stop.copy(platforms = listOf(updatedPlatformA, platformB, platform1))
+        val stateAfterTick = ArrivalsViewState.Content(
+            stops = listOf(updatedStop),
+            activeStopIndex = 0,
+            activePlatformCode = "B"
+        )
+        val rowsAfterTick = stateAfterTick.platformPickerRows
+        val idsAfterTick = rowsAfterTick.map { platformPickerItemId(it) }
+
+        assertEquals(idsBeforeTick, idsAfterTick)
+        rowsAfterTick.forEach { row ->
+            assertEquals(row.code.hashCode().toLong(), platformPickerItemId(row))
+            assertEquals(row.code.hashCode().toLong(), row.code.hashCode().toLong())
+        }
+    }
 }
