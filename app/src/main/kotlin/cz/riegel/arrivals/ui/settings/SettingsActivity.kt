@@ -23,21 +23,21 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
-import com.google.android.gms.tasks.CancellationTokenSource
 import cz.riegel.arrivals.R
 import cz.riegel.arrivals.data.DeparturesRepository
+import cz.riegel.arrivals.data.LocationResolver
 import cz.riegel.arrivals.data.GolemioApiClient
 import cz.riegel.arrivals.data.SettingsRepository
 import cz.riegel.arrivals.domain.model.Coordinates
 import cz.riegel.arrivals.widget.ArrivalsUpdateWorker
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Instant
 
 class SettingsActivity : AppCompatActivity() {
+
+    internal var locationResolver: LocationResolver? = null
+    private fun getLocationResolver(): LocationResolver =
+        locationResolver ?: LocationResolver.create(this).also { locationResolver = it }
 
     private lateinit var settingsRepository: SettingsRepository
     private lateinit var golemioClient: GolemioApiClient
@@ -68,7 +68,8 @@ class SettingsActivity : AppCompatActivity() {
         val granted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
                 permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
         if (granted) {
-            refreshLocationStatus()
+            btnGrantPermission.visibility = View.GONE
+            loadInitialLocationOrRefresh()
         } else {
             textLocationStatus.text = "⚠ Přístup k poloze byl odepřen. Bez oprávnění nelze automaticky určit nejbližší zastávku."
             btnGrantPermission.visibility = View.VISIBLE
@@ -117,7 +118,7 @@ class SettingsActivity : AppCompatActivity() {
         }
 
         btnRefreshLocation.setOnClickListener {
-            refreshLocationStatus()
+            refreshLocationStatus(isManual = true)
         }
 
         btnGrantPermission.setOnClickListener {
@@ -150,9 +151,39 @@ class SettingsActivity : AppCompatActivity() {
             requestLocationPermissions()
         } else {
             btnGrantPermission.visibility = View.GONE
-            refreshLocationStatus()
+            loadInitialLocationOrRefresh()
         }
         updateBackgroundLocationPrompt()
+    }
+
+    private fun loadInitialLocationOrRefresh() {
+        // Immediately display last known Location Fix (cached coordinates) so users don't see an empty spinner
+        val cachedCoords = DeparturesRepository.create(this).getLastCoordinates()
+        if (cachedCoords != null) {
+            updateLocationDisplay(cachedCoords, "poslední známá")
+            progressLocation.visibility = View.GONE
+            btnRefreshLocation.isEnabled = true
+            return
+        }
+
+        lifecycleScope.launch {
+            val lastLocation = try {
+                getLocationResolver().getLastKnownLocation()
+            } catch (_: Exception) {
+                null
+            }
+
+            if (lastLocation != null) {
+                val coords = Coordinates(lat = lastLocation.latitude, lon = lastLocation.longitude)
+                val accuracy = if (lastLocation.hasAccuracy()) "±${lastLocation.accuracy.toInt()} m" else "poslední známá"
+                DeparturesRepository.create(this@SettingsActivity).saveLocation(coords, Instant.now())
+                updateLocationDisplay(coords, accuracy)
+                progressLocation.visibility = View.GONE
+                btnRefreshLocation.isEnabled = true
+            } else {
+                refreshLocationStatus(isManual = false)
+            }
+        }
     }
 
     private fun requestLocationPermissions() {
@@ -164,7 +195,7 @@ class SettingsActivity : AppCompatActivity() {
         )
     }
 
-    private fun refreshLocationStatus() {
+    private fun refreshLocationStatus(isManual: Boolean = true) {
         val hasFine = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
         val hasCoarse = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
@@ -181,29 +212,23 @@ class SettingsActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
-                val fusedClient = LocationServices.getFusedLocationProviderClient(this@SettingsActivity)
-                val cts = CancellationTokenSource()
+                val highAccuracyTimeout = if (isManual) {
+                    LocationResolver.MANUAL_REFRESH_HIGH_ACCURACY_TIMEOUT_MS
+                } else {
+                    LocationResolver.DEFAULT_HIGH_ACCURACY_TIMEOUT_MS
+                }
 
-                // Actively query high accuracy GPS, then fallback to lastLocation or LocationManager
-                val location = try {
-                    withTimeoutOrNull(4_000) {
-                        fusedClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token).await()
-                    }
-                } finally {
-                    cts.cancel()
-                } ?: try {
-                    fusedClient.lastLocation.await()
-                } catch (_: Exception) {
-                    null
-                } ?: getLocationFromLocationManager()
+                val location = getLocationResolver().resolveLocation(
+                    highAccuracyTimeoutMs = highAccuracyTimeout,
+                    balancedTimeoutMs = LocationResolver.DEFAULT_BALANCED_TIMEOUT_MS
+                )
 
                 if (location != null) {
                     val lat = location.latitude
                     val lon = location.longitude
                     val accuracy = if (location.hasAccuracy()) "±${location.accuracy.toInt()} m" else "neznámá"
-
                     val coords = Coordinates(lat = lat, lon = lon)
-                    // Persist this fresh foreground fix immediately so the background widget worker has it
+
                     DeparturesRepository.create(this@SettingsActivity).saveLocation(
                         coords,
                         Instant.now()
@@ -212,19 +237,7 @@ class SettingsActivity : AppCompatActivity() {
                         ArrivalsUpdateWorker.enqueueOneTimeWork(this@SettingsActivity)
                     }
 
-                    if (!GolemioApiClient.isWithinPragueCoverage(coords)) {
-                        textLocationStatus.text = "⚠ Poloha: %.4f, %.4f (Přesnost: %s)\nPoloha je mimo oblast Prahy PID. Pokud používáte emulátor, nastavte GPS na Prahu nebo zvolte simulovanou zastávku níže."
-                            .format(lat, lon, accuracy)
-                    } else {
-                        val closest = golemioClient.findClosestStopDistance(coords)
-                        if (closest != null) {
-                            textLocationStatus.text = "✓ GPS poloha: %.4f, %.4f (Přesnost: %s)\nNejbližší zastávka: %s (%d m od vás)"
-                                .format(lat, lon, accuracy, closest.first, closest.second)
-                        } else {
-                            textLocationStatus.text = "✓ GPS poloha: %.4f, %.4f (Přesnost: %s)\nV okolí nebyla nalezena zastávka."
-                                .format(lat, lon, accuracy)
-                        }
-                    }
+                    updateLocationDisplay(coords, accuracy)
                 } else {
                     textLocationStatus.text = "⚠ GPS polohu se nepodařilo zaměřit. Zkontrolujte, zda je zapnutá GPS."
                 }
@@ -233,6 +246,22 @@ class SettingsActivity : AppCompatActivity() {
             } finally {
                 progressLocation.visibility = View.GONE
                 btnRefreshLocation.isEnabled = true
+            }
+        }
+    }
+
+    private fun updateLocationDisplay(coords: Coordinates, accuracyStr: String) {
+        if (!GolemioApiClient.isWithinPragueCoverage(coords)) {
+            textLocationStatus.text = "⚠ Poloha: %.4f, %.4f (Přesnost: %s)\nPoloha je mimo oblast Prahy PID. Pokud používáte emulátor, nastavte GPS na Prahu nebo zvolte simulovanou zastávku níže."
+                .format(coords.lat, coords.lon, accuracyStr)
+        } else {
+            val closest = golemioClient.findClosestStopDistance(coords)
+            if (closest != null) {
+                textLocationStatus.text = "✓ GPS poloha: %.4f, %.4f (Přesnost: %s)\nNejbližší zastávka: %s (%d m od vás)"
+                    .format(coords.lat, coords.lon, accuracyStr, closest.first, closest.second)
+            } else {
+                textLocationStatus.text = "✓ GPS poloha: %.4f, %.4f (Přesnost: %s)\nV okolí nebyla nalezena zastávka."
+                    .format(coords.lat, coords.lon, accuracyStr)
             }
         }
     }

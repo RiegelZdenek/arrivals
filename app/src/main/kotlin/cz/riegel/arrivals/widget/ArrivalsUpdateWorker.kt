@@ -13,12 +13,10 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.google.android.gms.location.LocationServices
-import com.google.android.gms.location.Priority
-import com.google.android.gms.tasks.CancellationTokenSource
 import cz.riegel.arrivals.data.DeparturesRepository
 import cz.riegel.arrivals.data.GolemioApiClient
 import cz.riegel.arrivals.data.LocationResolution
+import cz.riegel.arrivals.data.LocationResolver
 import cz.riegel.arrivals.data.SettingsRepository
 import cz.riegel.arrivals.data.TransitDataSource
 import cz.riegel.arrivals.data.model.GolemioDepartureBoardResponse
@@ -26,8 +24,6 @@ import cz.riegel.arrivals.domain.ArrivalsAction
 import cz.riegel.arrivals.domain.ArrivalsEngine
 import cz.riegel.arrivals.domain.ArrivalsViewState
 import cz.riegel.arrivals.domain.model.Coordinates
-import kotlinx.coroutines.tasks.await
-import kotlinx.coroutines.withTimeoutOrNull
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 
@@ -39,6 +35,7 @@ class ArrivalsUpdateWorker(
     private val settingsRepository = SettingsRepository(appContext)
     private val departuresRepository = DeparturesRepository.create(appContext)
     private val engine = ArrivalsEngine()
+    internal var locationResolver: LocationResolver = LocationResolver.create(appContext)
 
     override suspend fun doWork(): Result {
         val apiKey = settingsRepository.getApiKey()
@@ -154,40 +151,12 @@ class ArrivalsUpdateWorker(
         }
 
         return try {
-            val fusedClient = LocationServices.getFusedLocationProviderClient(appContext)
-
-            // 1. Actively query high-accuracy GPS fix with 4s timeout
-            val cts = CancellationTokenSource()
-            val freshLocation = try {
-                withTimeoutOrNull(4_000) {
-                    fusedClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token).await()
-                }
-            } finally {
-                cts.cancel()
-            }
-
-            if (freshLocation != null) {
-                return Coordinates(lat = freshLocation.latitude, lon = freshLocation.longitude)
-            }
-
-            // 2. Fallback to Fused lastLocation if fresh query timed out
-            val lastLocation = try {
-                fusedClient.lastLocation.await()
-            } catch (_: Exception) {
-                null
-            }
-            if (lastLocation != null) {
-                return Coordinates(lat = lastLocation.latitude, lon = lastLocation.longitude)
-            }
-
-            // 3. Fallback to Android LocationManager providers (reliable on emulators)
-            val lmLocation = getLocationFromLocationManager(appContext)
-            if (lmLocation != null) {
-                Coordinates(lat = lmLocation.latitude, lon = lmLocation.longitude)
-            } else {
-                null
-            }
-        } catch (e: Exception) {
+            val location = locationResolver.resolveLocation(
+                highAccuracyTimeoutMs = LocationResolver.DEFAULT_HIGH_ACCURACY_TIMEOUT_MS,
+                balancedTimeoutMs = LocationResolver.DEFAULT_BALANCED_TIMEOUT_MS
+            )
+            location?.let { Coordinates(lat = it.latitude, lon = it.longitude) }
+        } catch (_: Exception) {
             null
         }
     }

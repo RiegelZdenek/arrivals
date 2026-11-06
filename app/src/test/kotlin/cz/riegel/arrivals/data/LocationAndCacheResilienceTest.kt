@@ -440,4 +440,268 @@ class LocationAndCacheResilienceTest {
         assertTrue("Active stop departures should be empty because they elapsed", content.activeDepartures.isEmpty())
         assertEquals("No upcoming departures • Offline • Tap to retry", content.cachedWarning)
     }
+
+    private fun createMockLocation(provider: String, lat: Double = 50.0755, lon: Double = 14.4302): android.location.Location {
+        return android.location.Location(provider).apply {
+            latitude = lat
+            longitude = lon
+            time = System.currentTimeMillis()
+        }
+    }
+
+    @Test
+    fun multiTierResolver_tier1Success_returnsHighAccuracyWithoutCallingSubsequentTiers() = runBlocking {
+        var tier1Called = false
+        var tier2Called = false
+        var tier3Called = false
+        var tier4Called = false
+        var passedTimeout: Long? = null
+
+        val expectedLocation = createMockLocation("gps")
+        val resolver = DefaultLocationResolver(
+            context = context,
+            queryHighAccuracy = { timeout ->
+                tier1Called = true
+                passedTimeout = timeout
+                expectedLocation
+            },
+            queryBalancedPower = {
+                tier2Called = true
+                null
+            },
+            queryFusedLastLocation = {
+                tier3Called = true
+                null
+            },
+            queryLocationManager = {
+                tier4Called = true
+                null
+            }
+        )
+
+        val resolved = resolver.resolveLocation(highAccuracyTimeoutMs = 4_000L, balancedTimeoutMs = 3_000L)
+
+        assertTrue(tier1Called)
+        assertEquals(4_000L, passedTimeout)
+        assertFalse("Tier 2 should not be queried when Tier 1 succeeds", tier2Called)
+        assertFalse("Tier 3 should not be queried when Tier 1 succeeds", tier3Called)
+        assertFalse("Tier 4 should not be queried when Tier 1 succeeds", tier4Called)
+        assertEquals(expectedLocation, resolved)
+    }
+
+    @Test
+    fun multiTierResolver_tier1TimeoutOrNull_fallsBackToTier2Balanced() = runBlocking {
+        var tier1Called = false
+        var tier2Called = false
+        var tier3Called = false
+        var tier4Called = false
+        var passedBalancedTimeout: Long? = null
+
+        val expectedLocation = createMockLocation("network")
+        val resolver = DefaultLocationResolver(
+            context = context,
+            queryHighAccuracy = {
+                tier1Called = true
+                null // Simulated GPS timeout / null
+            },
+            queryBalancedPower = { timeout ->
+                tier2Called = true
+                passedBalancedTimeout = timeout
+                expectedLocation
+            },
+            queryFusedLastLocation = {
+                tier3Called = true
+                null
+            },
+            queryLocationManager = {
+                tier4Called = true
+                null
+            }
+        )
+
+        val resolved = resolver.resolveLocation(highAccuracyTimeoutMs = 4_000L, balancedTimeoutMs = 3_000L)
+
+        assertTrue(tier1Called)
+        assertTrue(tier2Called)
+        assertEquals(3_000L, passedBalancedTimeout)
+        assertFalse("Tier 3 should not be queried when Tier 2 succeeds", tier3Called)
+        assertFalse("Tier 4 should not be queried when Tier 2 succeeds", tier4Called)
+        assertEquals(expectedLocation, resolved)
+    }
+
+    @Test
+    fun multiTierResolver_tier1Exception_seamlesslyFallsBackToTier2Balanced() = runBlocking {
+        var tier2Called = false
+        val expectedLocation = createMockLocation("network")
+        val resolver = DefaultLocationResolver(
+            context = context,
+            queryHighAccuracy = {
+                throw SecurityException("Mock GPS permission failure")
+            },
+            queryBalancedPower = {
+                tier2Called = true
+                expectedLocation
+            },
+            queryFusedLastLocation = { null },
+            queryLocationManager = { null }
+        )
+
+        val resolved = resolver.resolveLocation()
+
+        assertTrue(tier2Called)
+        assertEquals(expectedLocation, resolved)
+    }
+
+    @Test
+    fun multiTierResolver_tier2TimeoutOrNull_fallsBackToTier3FusedLastLocation() = runBlocking {
+        var tier1Called = false
+        var tier2Called = false
+        var tier3Called = false
+        var tier4Called = false
+
+        val expectedLocation = createMockLocation("fused")
+        val resolver = DefaultLocationResolver(
+            context = context,
+            queryHighAccuracy = {
+                tier1Called = true
+                null
+            },
+            queryBalancedPower = {
+                tier2Called = true
+                null
+            },
+            queryFusedLastLocation = {
+                tier3Called = true
+                expectedLocation
+            },
+            queryLocationManager = {
+                tier4Called = true
+                null
+            }
+        )
+
+        val resolved = resolver.resolveLocation()
+
+        assertTrue(tier1Called)
+        assertTrue(tier2Called)
+        assertTrue(tier3Called)
+        assertFalse("Tier 4 should not be queried when Tier 3 succeeds", tier4Called)
+        assertEquals(expectedLocation, resolved)
+    }
+
+    @Test
+    fun multiTierResolver_tier2Exception_seamlesslyFallsBackToTier3() = runBlocking {
+        var tier3Called = false
+        val expectedLocation = createMockLocation("fused")
+        val resolver = DefaultLocationResolver(
+            context = context,
+            queryHighAccuracy = { null },
+            queryBalancedPower = { throw RuntimeException("Cellular tower triangulation error") },
+            queryFusedLastLocation = {
+                tier3Called = true
+                expectedLocation
+            },
+            queryLocationManager = { null }
+        )
+
+        val resolved = resolver.resolveLocation()
+
+        assertTrue(tier3Called)
+        assertEquals(expectedLocation, resolved)
+    }
+
+    @Test
+    fun multiTierResolver_tier3NullOrException_fallsBackToTier4LocationManager() = runBlocking {
+        var tier4Called = false
+        val expectedLocation = createMockLocation("passive")
+        val resolver = DefaultLocationResolver(
+            context = context,
+            queryHighAccuracy = { null },
+            queryBalancedPower = { null },
+            queryFusedLastLocation = { throw IllegalStateException("Fused service unavailable") },
+            queryLocationManager = {
+                tier4Called = true
+                expectedLocation
+            }
+        )
+
+        val resolved = resolver.resolveLocation()
+
+        assertTrue(tier4Called)
+        assertEquals(expectedLocation, resolved)
+    }
+
+    @Test
+    fun multiTierResolver_allTiersFail_returnsNullWithoutThrowing() = runBlocking {
+        val resolver = DefaultLocationResolver(
+            context = context,
+            queryHighAccuracy = { throw RuntimeException("GPS failed") },
+            queryBalancedPower = { throw RuntimeException("Network failed") },
+            queryFusedLastLocation = { throw RuntimeException("Fused failed") },
+            queryLocationManager = { throw RuntimeException("LocationManager failed") }
+        )
+
+        val resolved = resolver.resolveLocation()
+
+        assertNull("All tiers failing should return null seamlessly without throwing", resolved)
+    }
+
+    @Test
+    fun multiTierResolver_manualRefresh_passes10SecondsTimeoutForTier1() = runBlocking {
+        var passedTimeout: Long? = null
+        val resolver = DefaultLocationResolver(
+            context = context,
+            queryHighAccuracy = { timeout ->
+                passedTimeout = timeout
+                createMockLocation("gps")
+            },
+            queryBalancedPower = { null },
+            queryFusedLastLocation = { null },
+            queryLocationManager = { null }
+        )
+
+        resolver.resolveLocation(
+            highAccuracyTimeoutMs = LocationResolver.MANUAL_REFRESH_HIGH_ACCURACY_TIMEOUT_MS,
+            balancedTimeoutMs = LocationResolver.DEFAULT_BALANCED_TIMEOUT_MS
+        )
+
+        assertEquals(10_000L, passedTimeout)
+    }
+
+    @Test
+    fun multiTierResolver_getLastKnownLocation_checksTier3ThenTier4WithoutQueryingTiers1And2() = runBlocking {
+        var tier1Called = false
+        var tier2Called = false
+        var tier3Called = false
+        var tier4Called = false
+
+        val expectedLocation = createMockLocation("passive")
+        val resolver = DefaultLocationResolver(
+            context = context,
+            queryHighAccuracy = {
+                tier1Called = true
+                null
+            },
+            queryBalancedPower = {
+                tier2Called = true
+                null
+            },
+            queryFusedLastLocation = {
+                tier3Called = true
+                null // Tier 3 misses
+            },
+            queryLocationManager = {
+                tier4Called = true
+                expectedLocation
+            }
+        )
+
+        val result = resolver.getLastKnownLocation()
+
+        assertFalse("Tier 1 should not be called in getLastKnownLocation", tier1Called)
+        assertFalse("Tier 2 should not be called in getLastKnownLocation", tier2Called)
+        assertTrue("Tier 3 should be checked in getLastKnownLocation", tier3Called)
+        assertTrue("Tier 4 should be checked when Tier 3 misses in getLastKnownLocation", tier4Called)
+        assertEquals(expectedLocation, result)
+    }
 }
