@@ -266,27 +266,6 @@ class SettingsActivity : AppCompatActivity() {
         }
     }
 
-    @SuppressLint("MissingPermission")
-    private fun getLocationFromLocationManager(): Location? {
-        return try {
-            val lm = getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
-            val providers = listOf(
-                LocationManager.GPS_PROVIDER,
-                LocationManager.NETWORK_PROVIDER,
-                LocationManager.PASSIVE_PROVIDER
-            )
-            providers.mapNotNull { provider ->
-                try {
-                    if (lm.isProviderEnabled(provider)) lm.getLastKnownLocation(provider) else null
-                } catch (_: Exception) {
-                    null
-                }
-            }.maxByOrNull { it.time }
-        } catch (_: Exception) {
-            null
-        }
-    }
-
     private fun testApiConnection() {
         val key = editApiKey.text.toString().trim()
         if (key.isBlank()) {

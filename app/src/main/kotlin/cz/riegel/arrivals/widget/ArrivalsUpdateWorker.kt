@@ -144,6 +144,11 @@ class ArrivalsUpdateWorker(
         ): Boolean = updateMutex.withLock {
             val nowMillis = currentTime.toEpochMilli()
             if (!force && (nowMillis - lastSuccessfulUpdateMillis) < MIN_UPDATE_INTERVAL_MS) {
+                val currentState = WidgetStateManager.getState(appContext, currentTime, departuresRepository)
+                if (currentState is ArrivalsViewState.Content && currentState.isRefreshing) {
+                    WidgetStateManager.setState(appContext, currentState.copy(isRefreshing = false), departuresRepository)
+                    WidgetStateManager.updateAllWidgets(appContext)
+                }
                 return true
             }
 
@@ -298,27 +303,6 @@ class ArrivalsUpdateWorker(
                     balancedTimeoutMs = LocationResolver.DEFAULT_BALANCED_TIMEOUT_MS
                 )
                 location?.let { Coordinates(lat = it.latitude, lon = it.longitude) }
-            } catch (_: Exception) {
-                null
-            }
-        }
-
-        @SuppressLint("MissingPermission")
-        private fun getLocationFromLocationManager(context: Context): Location? {
-            return try {
-                val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
-                val providers = listOf(
-                    LocationManager.GPS_PROVIDER,
-                    LocationManager.NETWORK_PROVIDER,
-                    LocationManager.PASSIVE_PROVIDER
-                )
-                providers.mapNotNull { provider ->
-                    try {
-                        if (lm.isProviderEnabled(provider)) lm.getLastKnownLocation(provider) else null
-                    } catch (_: Exception) {
-                        null
-                    }
-                }.maxByOrNull { it.time }
             } catch (_: Exception) {
                 null
             }

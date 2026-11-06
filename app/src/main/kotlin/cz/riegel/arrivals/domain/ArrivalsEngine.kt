@@ -132,18 +132,19 @@ class ArrivalsEngine(
 
                     val resolvedStopIndex: Int
                     val resolvedPlatformCode: String
+                    val resolvedStop: Stop
 
                     if (shouldSnapToClosest) {
                         resolvedStopIndex = 0
-                        val primaryStop = rankedStops.first()
-                        resolvedPlatformCode = resolveDefaultPlatformCode(primaryStop, action.userCoordinates)
+                        resolvedStop = rankedStops.first()
+                        resolvedPlatformCode = resolveDefaultPlatformCode(resolvedStop, action.userCoordinates)
                     } else {
                         val previousStop = state.activeStop
                         val matchedStopIndex = rankedStops.indexOfFirst {
                             it.id == previousStop.id || it.name == previousStop.name
                         }
                         resolvedStopIndex = if (matchedStopIndex >= 0) matchedStopIndex else 0
-                        val resolvedStop = rankedStops[resolvedStopIndex]
+                        resolvedStop = rankedStops[resolvedStopIndex]
                         resolvedPlatformCode = if (
                             matchedStopIndex >= 0 &&
                             resolvedStop.platforms.any { it.code == state.activePlatformCode }
@@ -154,7 +155,6 @@ class ArrivalsEngine(
                         }
                     }
 
-                    val resolvedStop = rankedStops[resolvedStopIndex]
                     val resolvedPickerMode = when (state.pickerMode) {
                         PickerMode.StopPicker -> {
                             if (rankedStops.size > 1) PickerMode.StopPicker else PickerMode.Departures

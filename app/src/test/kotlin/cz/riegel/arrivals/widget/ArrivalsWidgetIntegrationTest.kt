@@ -914,6 +914,7 @@ class ArrivalsWidgetIntegrationTest {
         ArrivalsUpdateWorker.defaultTransitDataSourceProvider = { _, _ -> fakeDataSource }
 
         val job = WidgetStateManager.onRefresh(context)
+        kotlinx.coroutines.delay(50)
         ArrivalsUpdateWorker.executeUpdate(context)
         job.join()
 
@@ -921,5 +922,98 @@ class ArrivalsWidgetIntegrationTest {
         assertFalse(state.isRefreshing)
         assertEquals("Hlavní nádraží", state.activeStop.name)
         assertEquals(1, callCount)
+    }
+
+    @Test
+    fun executeUpdate_whenThrottled_clearsIsRefreshingFlag() = runBlocking {
+        val now = Instant.now()
+        val initialStop = sampleStop("s1", "Initial Stop", listOf("A"))
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(initialStop),
+                activeStopIndex = 0,
+                activePlatformCode = "A",
+                isRefreshing = true
+            )
+        )
+
+        // Set lastSuccessfulUpdateMillis to now so that non-forced update is throttled
+        ArrivalsUpdateWorker.lastSuccessfulUpdateMillis = now.toEpochMilli()
+
+        val result = ArrivalsUpdateWorker.executeUpdate(
+            appContext = context,
+            currentTime = now.plusMillis(100),
+            force = false
+        )
+
+        assertTrue(result)
+        val state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
+        assertFalse("Throttled non-forced update must clear isRefreshing so widget does not stay stuck", state.isRefreshing)
+    }
+
+    @Test
+    fun onRefresh_passesForceTrue_bypassesThrottling() = runBlocking {
+        val settingsRepo = cz.riegel.arrivals.data.SettingsRepository(context)
+        settingsRepo.saveApiKey("test-key")
+        settingsRepo.saveSimulatedHubIndex(1)
+
+        val now = Instant.now()
+        var callCount = 0
+        val mockResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "s_hlavni", stopName = "Hlavní nádraží", platformCode = "1", stopLat = 50.083, stopLon = 14.435)
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.plusSeconds(120).toString(),
+                        predicted = now.plusSeconds(120).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "s_hlavni", name = "Hlavní nádraží", platformCode = "1"),
+                    route = GolemioRouteDto(shortName = "9", type = 0),
+                    trip = GolemioTripDto(headsign = "Sídliště Řepy")
+                )
+            )
+        )
+        val fakeDataSource = object : cz.riegel.arrivals.data.TransitDataSource {
+            override suspend fun fetchNearbyDepartures(
+                coordinates: Coordinates,
+                radiusMeters: Int,
+                limit: Int
+            ): Result<GolemioDepartureBoardResponse> {
+                callCount++
+                return Result.success(mockResponse)
+            }
+
+            override suspend fun fetchDeparturesForStops(
+                stopNames: List<String>,
+                limit: Int
+            ): Result<GolemioDepartureBoardResponse> {
+                callCount++
+                return Result.success(mockResponse)
+            }
+        }
+        ArrivalsUpdateWorker.defaultTransitDataSourceProvider = { _, _ -> fakeDataSource }
+
+        val initialStop = sampleStop("s1", "Initial Stop", listOf("A"))
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(initialStop),
+                activeStopIndex = 0,
+                activePlatformCode = "A",
+                isRefreshing = false
+            )
+        )
+
+        // Set lastSuccessfulUpdateMillis to simulate a recent update 500ms ago
+        ArrivalsUpdateWorker.lastSuccessfulUpdateMillis = System.currentTimeMillis() - 500L
+
+        // onRefresh should pass force = true and NOT be throttled
+        val job = WidgetStateManager.onRefresh(context)
+        job.join()
+
+        assertEquals("Manual refresh should not be throttled", 1, callCount)
     }
 }

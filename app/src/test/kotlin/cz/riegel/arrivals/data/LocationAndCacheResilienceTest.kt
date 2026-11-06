@@ -250,6 +250,37 @@ class LocationAndCacheResilienceTest {
     }
 
     @Test
+    fun rehydrateFromCache_whenAllCachedDeparturesElapsed_setsNoUpcomingDeparturesOfflineBanner() {
+        val repository = InMemoryDeparturesRepository()
+        val now = Instant.parse("2026-10-23T13:45:00Z")
+        val fetchTime = Instant.parse("2026-10-23T13:42:00Z")
+
+        val cachedResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "U100Z1", stopName = "Anděl", platformCode = "A")
+            ),
+            departures = listOf(
+                // Expired departure (> 30s ago)
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.minusSeconds(60).toString(),
+                        predicted = now.minusSeconds(60).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "U100Z1", name = "Anděl", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "9", type = 0),
+                    trip = GolemioTripDto(headsign = "Sídliště Řepy")
+                )
+            )
+        )
+        repository.saveDepartures(cachedResponse, fetchTime)
+
+        val directRehydrated = WidgetStateManager.rehydrateFromCache(now, repository)
+        assertNotNull("Rehydration should succeed when cache is present", directRehydrated)
+        assertTrue("Active departures should be empty when all elapsed", directRehydrated!!.activeDepartures.isEmpty())
+        assertEquals("No upcoming departures • Offline • Tap to retry", directRehydrated.cachedWarning)
+    }
+
+    @Test
     fun restoreCachedDepartures_evictsDeparturesElapsedMoreThan30Seconds() = runBlocking {
         val repository = InMemoryDeparturesRepository()
         val now = Instant.parse("2026-10-23T13:45:00Z")
@@ -503,7 +534,7 @@ class LocationAndCacheResilienceTest {
             context = context,
             queryHighAccuracy = {
                 tier1Called = true
-                null // Simulated GPS timeout / null
+                null // Simulated Location Fix timeout / null
             },
             queryBalancedPower = { timeout ->
                 tier2Called = true

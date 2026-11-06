@@ -86,27 +86,8 @@ class DefaultLocationResolver(
             if (e is CancellationException && e !is TimeoutCancellationException) throw e
         }
 
-        // Tier 3: Query Fused Location Provider lastLocation
-        try {
-            val tier3 = queryFusedLastLocation()
-            if (tier3 != null) {
-                return tier3
-            }
-        } catch (e: Exception) {
-            if (e is CancellationException && e !is TimeoutCancellationException) throw e
-        }
-
-        // Tier 4: Fall back to LocationManager providers
-        try {
-            val tier4 = queryLocationManager()
-            if (tier4 != null) {
-                return tier4
-            }
-        } catch (e: Exception) {
-            if (e is CancellationException && e !is TimeoutCancellationException) throw e
-        }
-
-        return null
+        // Tier 3 & 4: Fall back to last known location (Fused lastLocation then LocationManager)
+        return getLastKnownLocation()
     }
 
     override suspend fun getLastKnownLocation(): Location? {

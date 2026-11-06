@@ -85,11 +85,16 @@ object WidgetStateManager {
                     engine.findClosestPlatform(savedStop, cached.coordinates)?.code
                         ?: savedStop.platforms.firstOrNull()?.code.orEmpty()
                 }
-                reduced.copy(
+                val rehydrated = reduced.copy(
                     activeStopIndex = savedStopIdx,
                     activePlatformCode = validPlatform,
                     pickerMode = PickerMode.Departures
                 )
+                if (rehydrated.activeDepartures.isEmpty()) {
+                    rehydrated.copy(cachedWarning = "No upcoming departures • Offline • Tap to retry")
+                } else {
+                    rehydrated
+                }
             } else {
                 null
             }
@@ -184,7 +189,8 @@ object WidgetStateManager {
             try {
                 ArrivalsUpdateWorker.executeUpdate(
                     appContext = context.applicationContext,
-                    departuresRepository = repository
+                    departuresRepository = repository,
+                    force = true
                 )
             } catch (_: Exception) {
             }
