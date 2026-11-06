@@ -2,6 +2,9 @@ package cz.riegel.arrivals.widget
 
 import android.content.Context
 import androidx.compose.ui.unit.dp
+import androidx.glance.GlanceId
+import androidx.glance.action.actionParametersOf
+import androidx.work.OutOfQuotaPolicy
 import androidx.test.core.app.ApplicationProvider
 import androidx.work.testing.TestListenableWorkerBuilder
 import cz.riegel.arrivals.data.DeparturesRepository
@@ -73,6 +76,9 @@ class ArrivalsWidgetIntegrationTest {
     fun setUp() {
         context = ApplicationProvider.getApplicationContext()
         ArrivalsUpdateWorker.oneTimeWorkEnqueuedCount = 0
+        ArrivalsUpdateWorker.lastEnqueuedWorkRequest = null
+        ArrivalsUpdateWorker.defaultTransitDataSourceProvider = null
+        ArrivalsUpdateWorker.lastSuccessfulUpdateMillis = 0L
     }
 
     @Test
@@ -766,5 +772,154 @@ class ArrivalsWidgetIntegrationTest {
         assertEquals(1, state.activeDepartures.size)
         assertEquals("A", state.activeDepartures.first().line.name)
         assertEquals("Nemocnice Motol", state.activeDepartures.first().terminus)
+    }
+
+    @Test
+    fun enqueueOneTimeWork_configuresExpeditedWorkRequestWithRunAsNonExpeditedPolicy() {
+        ArrivalsUpdateWorker.enqueueExpeditedOneTimeWork(context)
+
+        val request = ArrivalsUpdateWorker.lastEnqueuedWorkRequest
+        assertNotNull("WorkRequest should be created", request)
+        assertTrue("WorkRequest must be expedited", request!!.workSpec.expedited)
+        assertEquals(
+            "OutOfQuotaPolicy must be RUN_AS_NON_EXPEDITED_WORK_REQUEST",
+            OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST,
+            request.workSpec.outOfQuotaPolicy
+        )
+    }
+
+    @Test
+    fun refreshActionCallback_triggersImmediateRefreshAndEnqueuesExpeditedWorker() = runBlocking {
+        val stop = sampleStop("s1", "I. P. Pavlova", listOf("A"))
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(stop),
+                activeStopIndex = 0,
+                activePlatformCode = "A",
+                isRefreshing = false
+            )
+        )
+
+        val dummyGlanceId = object : GlanceId {}
+        RefreshActionCallback().onAction(context, dummyGlanceId, actionParametersOf())
+
+        val state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
+        assertTrue("Immediate feedback: isRefreshing must be true", state.isRefreshing)
+        assertTrue("Expedited one-time work should be enqueued", ArrivalsUpdateWorker.oneTimeWorkEnqueuedCount > 0)
+        assertNotNull(ArrivalsUpdateWorker.lastEnqueuedWorkRequest)
+        assertTrue(ArrivalsUpdateWorker.lastEnqueuedWorkRequest!!.workSpec.expedited)
+    }
+
+    @Test
+    fun onRefresh_triggersInProcessCoroutineUpdate_fetchesDeparturesAndUpdatesState() = runBlocking {
+        val settingsRepo = cz.riegel.arrivals.data.SettingsRepository(context)
+        settingsRepo.saveApiKey("test-key")
+        settingsRepo.saveSimulatedHubIndex(1)
+
+        val initialStop = sampleStop("s1", "Initial Stop", listOf("A"))
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(initialStop),
+                activeStopIndex = 0,
+                activePlatformCode = "A",
+                isRefreshing = false
+            )
+        )
+
+        val now = Instant.now()
+        val mockResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "s_hlavni", stopName = "Hlavní nádraží", platformCode = "1", stopLat = 50.083, stopLon = 14.435)
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.plusSeconds(120).toString(),
+                        predicted = now.plusSeconds(120).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "s_hlavni", name = "Hlavní nádraží", platformCode = "1"),
+                    route = GolemioRouteDto(shortName = "9", type = 0),
+                    trip = GolemioTripDto(headsign = "Sídliště Řepy")
+                )
+            )
+        )
+        val fakeDataSource = object : cz.riegel.arrivals.data.TransitDataSource {
+            override suspend fun fetchNearbyDepartures(
+                coordinates: Coordinates,
+                radiusMeters: Int,
+                limit: Int
+            ): Result<GolemioDepartureBoardResponse> = Result.success(mockResponse)
+
+            override suspend fun fetchDeparturesForStops(
+                stopNames: List<String>,
+                limit: Int
+            ): Result<GolemioDepartureBoardResponse> = Result.success(mockResponse)
+        }
+        ArrivalsUpdateWorker.defaultTransitDataSourceProvider = { _, _ -> fakeDataSource }
+
+        val job = WidgetStateManager.onRefresh(context)
+        job.join()
+
+        val state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
+        assertFalse("Refreshing indicator should dismiss upon completion", state.isRefreshing)
+        assertEquals("Hlavní nádraží", state.activeStop.name)
+        assertEquals(1, state.activeDepartures.size)
+        assertEquals("9", state.activeDepartures.first().line.name)
+    }
+
+    @Test
+    fun inProcessUpdateAndWorker_concurrentExecution_isSafeAndIdempotent() = runBlocking {
+        val settingsRepo = cz.riegel.arrivals.data.SettingsRepository(context)
+        settingsRepo.saveApiKey("test-key")
+        settingsRepo.saveSimulatedHubIndex(1)
+
+        var callCount = 0
+        val now = Instant.now()
+        val mockResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "s_hlavni", stopName = "Hlavní nádraží", platformCode = "1", stopLat = 50.083, stopLon = 14.435)
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.plusSeconds(120).toString(),
+                        predicted = now.plusSeconds(120).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "s_hlavni", name = "Hlavní nádraží", platformCode = "1"),
+                    route = GolemioRouteDto(shortName = "9", type = 0),
+                    trip = GolemioTripDto(headsign = "Sídliště Řepy")
+                )
+            )
+        )
+        val fakeDataSource = object : cz.riegel.arrivals.data.TransitDataSource {
+            override suspend fun fetchNearbyDepartures(
+                coordinates: Coordinates,
+                radiusMeters: Int,
+                limit: Int
+            ): Result<GolemioDepartureBoardResponse> {
+                callCount++
+                return Result.success(mockResponse)
+            }
+
+            override suspend fun fetchDeparturesForStops(
+                stopNames: List<String>,
+                limit: Int
+            ): Result<GolemioDepartureBoardResponse> {
+                callCount++
+                return Result.success(mockResponse)
+            }
+        }
+        ArrivalsUpdateWorker.defaultTransitDataSourceProvider = { _, _ -> fakeDataSource }
+
+        val job = WidgetStateManager.onRefresh(context)
+        ArrivalsUpdateWorker.executeUpdate(context)
+        job.join()
+
+        val state = WidgetStateManager.getState(context) as ArrivalsViewState.Content
+        assertFalse(state.isRefreshing)
+        assertEquals("Hlavní nádraží", state.activeStop.name)
+        assertEquals(1, callCount)
     }
 }
