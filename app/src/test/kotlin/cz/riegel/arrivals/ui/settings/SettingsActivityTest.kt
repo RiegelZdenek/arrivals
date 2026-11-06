@@ -14,6 +14,12 @@ import cz.riegel.arrivals.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import android.location.Location
+import cz.riegel.arrivals.data.DeparturesRepository
+import cz.riegel.arrivals.data.LocationResolver
+import cz.riegel.arrivals.domain.model.Coordinates
+import java.time.Instant
+import org.junit.Assert.assertFalse
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
@@ -171,5 +177,59 @@ class SettingsActivityTest {
             View.GONE,
             prompt.visibility
         )
+    }
+
+    @Test
+    @Config(sdk = [34])
+    fun openingSettingsActivity_immediatelyDisplaysLastKnownLocationFromRepository() {
+        val app = ApplicationProvider.getApplicationContext<Context>()
+        val shadowApp = shadowOf(app as android.app.Application)
+        shadowApp.grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
+
+        val pragueCoords = Coordinates(lat = 50.0755, lon = 14.4302)
+        DeparturesRepository.create(app).saveLocation(pragueCoords, Instant.now())
+
+        val controller = Robolectric.buildActivity(SettingsActivity::class.java).setup()
+        val activity = controller.get()
+
+        val textLocationStatus = activity.findViewById<TextView>(R.id.textLocationStatus)
+        val progressLocation = activity.findViewById<View>(R.id.progressLocation)
+        val btnRefreshLocation = activity.findViewById<Button>(R.id.btnRefreshLocation)
+
+        assertEquals("Progress spinner should not be visible when cached location is present", View.GONE, progressLocation.visibility)
+        assertTrue("Refresh button should be enabled", btnRefreshLocation.isEnabled)
+        assertTrue("Location status should display coordinates immediately", textLocationStatus.text.contains("50.0755"))
+        assertFalse("Should not display progress text", textLocationStatus.text.contains("Zjišťování"))
+    }
+
+    @Test
+    @Config(sdk = [34])
+    fun manualRefreshLocation_callsResolverWith10SecondsTimeout() {
+        val app = ApplicationProvider.getApplicationContext<Context>()
+        val shadowApp = shadowOf(app as android.app.Application)
+        shadowApp.grantPermissions(Manifest.permission.ACCESS_FINE_LOCATION)
+
+        var requestedTimeout: Long? = null
+        val fakeResolver = object : LocationResolver {
+            override suspend fun resolveLocation(highAccuracyTimeoutMs: Long, balancedTimeoutMs: Long): Location? {
+                requestedTimeout = highAccuracyTimeoutMs
+                return Location("gps").apply {
+                    latitude = 50.0755
+                    longitude = 14.4302
+                    time = System.currentTimeMillis()
+                }
+            }
+            override suspend fun getLastKnownLocation(): Location? = null
+        }
+
+        val controller = Robolectric.buildActivity(SettingsActivity::class.java)
+        val activity = controller.get()
+        activity.locationResolver = fakeResolver
+        controller.setup()
+
+        val btnRefresh = activity.findViewById<Button>(R.id.btnRefreshLocation)
+        btnRefresh.performClick()
+
+        assertEquals("Manual refresh must pass 10-second timeout for satellite GPS lock", 10_000L, requestedTimeout)
     }
 }
