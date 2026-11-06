@@ -208,4 +208,236 @@ class LocationAndCacheResilienceTest {
         assertEquals("Cached 15:42 • Tap to retry", restored.cachedWarning)
         assertEquals("9", restored.activeDepartures.first().line.name)
     }
+
+    @Test
+    fun rehydrateFromCache_retainsWarningBannerFromCachedDepartures() {
+        val repository = InMemoryDeparturesRepository()
+        val now = Instant.parse("2026-10-23T13:45:00Z")
+        val fetchTime = Instant.parse("2026-10-23T13:42:00Z") // 15:42 in Prague
+
+        val cachedResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "U100Z1", stopName = "Anděl", platformCode = "A")
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.plusSeconds(300).toString(),
+                        predicted = now.plusSeconds(300).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "U100Z1", name = "Anděl", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "9", type = 0),
+                    trip = GolemioTripDto(headsign = "Sídliště Řepy")
+                )
+            )
+        )
+        repository.saveDepartures(cachedResponse, fetchTime)
+
+        // Test direct internal rehydrateFromCache
+        val directRehydrated = WidgetStateManager.rehydrateFromCache(now, repository)
+        assertNotNull("Rehydration should succeed when cache is present", directRehydrated)
+        assertEquals("Cached 15:42 • Tap to retry", directRehydrated!!.cachedWarning)
+
+        // Test process restoration via getState() when in Loading state
+        WidgetStateManager.setState(context, ArrivalsViewState.Loading(), repository)
+        val state = WidgetStateManager.getState(context, now, repository)
+        assertTrue("State should be Content after rehydrating from cache", state is ArrivalsViewState.Content)
+        val content = state as ArrivalsViewState.Content
+        assertEquals("Cached 15:42 • Tap to retry", content.cachedWarning)
+        assertEquals("Anděl", content.activeStop.name)
+        assertEquals(1, content.activeDepartures.size)
+    }
+
+    @Test
+    fun restoreCachedDepartures_evictsDeparturesElapsedMoreThan30Seconds() = runBlocking {
+        val repository = InMemoryDeparturesRepository()
+        val now = Instant.parse("2026-10-23T13:45:00Z")
+        val fetchTime = Instant.parse("2026-10-23T13:42:00Z")
+
+        val cachedResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "U100Z1", stopName = "Anděl", platformCode = "A")
+            ),
+            departures = listOf(
+                // Expired: 45 seconds ago (< now - 30s)
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.minusSeconds(45).toString(),
+                        predicted = now.minusSeconds(45).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "U100Z1", name = "Anděl", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "12", type = 0),
+                    trip = GolemioTripDto(headsign = "Výstaviště")
+                ),
+                // Expired: 31 seconds ago (< now - 30s)
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.minusSeconds(31).toString(),
+                        predicted = now.minusSeconds(31).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "U100Z1", name = "Anděl", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "20", type = 0),
+                    trip = GolemioTripDto(headsign = "Divoká Šárka")
+                ),
+                // Upcoming: 120 seconds in future
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.plusSeconds(120).toString(),
+                        predicted = now.plusSeconds(120).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "U100Z1", name = "Anděl", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "9", type = 0),
+                    trip = GolemioTripDto(headsign = "Sídliště Řepy")
+                )
+            )
+        )
+        repository.saveDepartures(cachedResponse, fetchTime)
+
+        val stop = Stop("U100Z1", "Anděl", platforms = listOf(Platform("U100Z1", "A")))
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(stop),
+                activeStopIndex = 0,
+                activePlatformCode = "A"
+            ),
+            repository = repository
+        )
+
+        ArrivalsUpdateWorker.restoreCachedDepartures(
+            context = context,
+            now = now,
+            fallbackErrorMessage = "Connection failed",
+            repository = repository
+        )
+
+        val restored = WidgetStateManager.getState(context, now, repository = repository) as ArrivalsViewState.Content
+        assertEquals(1, restored.activeDepartures.size)
+        assertEquals("9", restored.activeDepartures.first().line.name)
+        assertEquals("Cached 15:42 • Tap to retry", restored.cachedWarning)
+    }
+
+    @Test
+    fun restoreCachedDepartures_whenAllCachedDeparturesElapsed_displaysExplicitEmptyStateWithOfflineBanner() = runBlocking {
+        val repository = InMemoryDeparturesRepository()
+        val now = Instant.parse("2026-10-23T13:45:00Z")
+        val fetchTime = Instant.parse("2026-10-23T13:42:00Z")
+
+        val cachedResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "U100Z1", stopName = "Anděl", platformCode = "A")
+            ),
+            departures = listOf(
+                // All departures elapsed (> 30s ago)
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.minusSeconds(60).toString(),
+                        predicted = now.minusSeconds(60).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "U100Z1", name = "Anděl", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "9", type = 0),
+                    trip = GolemioTripDto(headsign = "Sídliště Řepy")
+                ),
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.minusSeconds(40).toString(),
+                        predicted = now.minusSeconds(40).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "U100Z1", name = "Anděl", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "12", type = 0),
+                    trip = GolemioTripDto(headsign = "Výstaviště")
+                )
+            )
+        )
+        repository.saveDepartures(cachedResponse, fetchTime)
+
+        val stop = Stop("U100Z1", "Anděl", platforms = listOf(Platform("U100Z1", "A")))
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(stop),
+                activeStopIndex = 0,
+                activePlatformCode = "A"
+            ),
+            repository = repository
+        )
+
+        ArrivalsUpdateWorker.restoreCachedDepartures(
+            context = context,
+            now = now,
+            fallbackErrorMessage = "Connection timed out",
+            repository = repository
+        )
+
+        val state = WidgetStateManager.getState(context, now, repository = repository)
+        assertTrue("State should be Content with empty departures, not Error", state is ArrivalsViewState.Content)
+        val content = state as ArrivalsViewState.Content
+        assertTrue("All departures should be filtered out / empty", content.activeDepartures.isEmpty())
+        assertEquals("No upcoming departures • Offline • Tap to retry", content.cachedWarning)
+        assertEquals("Anděl", content.activeStop.name)
+    }
+
+    @Test
+    fun restoreCachedDepartures_whenActiveStopHasOnlyElapsedDepartures_displaysExplicitEmptyStateWithOfflineBanner() = runBlocking {
+        val repository = InMemoryDeparturesRepository()
+        val now = Instant.parse("2026-10-23T13:45:00Z")
+        val fetchTime = Instant.parse("2026-10-23T13:42:00Z")
+
+        val cachedResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "U100Z1", stopName = "Anděl", platformCode = "A"),
+                GolemioStopDto(stopId = "U200Z1", stopName = "Karlovo náměstí", platformCode = "B")
+            ),
+            departures = listOf(
+                // Anděl: expired
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.minusSeconds(60).toString(),
+                        predicted = now.minusSeconds(60).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "U100Z1", name = "Anděl", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "9", type = 0),
+                    trip = GolemioTripDto(headsign = "Sídliště Řepy")
+                ),
+                // Karlovo náměstí: upcoming
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.plusSeconds(300).toString(),
+                        predicted = now.plusSeconds(300).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "U200Z1", name = "Karlovo náměstí", platformCode = "B"),
+                    route = GolemioRouteDto(shortName = "22", type = 0),
+                    trip = GolemioTripDto(headsign = "Bílá Hora")
+                )
+            )
+        )
+        repository.saveDepartures(cachedResponse, fetchTime)
+
+        // Commuter is actively focused on Anděl
+        val andelStop = Stop("U100Z1", "Anděl", platforms = listOf(Platform("U100Z1", "A")))
+        val knStop = Stop("U200Z1", "Karlovo náměstí", platforms = listOf(Platform("U200Z1", "B")))
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(andelStop, knStop),
+                activeStopIndex = 0,
+                activePlatformCode = "A"
+            ),
+            repository = repository
+        )
+
+        ArrivalsUpdateWorker.restoreCachedDepartures(
+            context = context,
+            now = now,
+            fallbackErrorMessage = "Connection timed out",
+            repository = repository
+        )
+
+        val state = WidgetStateManager.getState(context, now, repository = repository)
+        assertTrue("State should be Content", state is ArrivalsViewState.Content)
+        val content = state as ArrivalsViewState.Content
+        assertEquals("Anděl", content.activeStop.name)
+        assertTrue("Active stop departures should be empty because they elapsed", content.activeDepartures.isEmpty())
+        assertEquals("No upcoming departures • Offline • Tap to retry", content.cachedWarning)
+    }
 }

@@ -281,18 +281,20 @@ class ArrivalsUpdateWorker(
                 if (updatedState is ArrivalsViewState.Content) {
                     val matchedStop = if (targetStop != null) {
                         updatedState.stops.find { it.id == targetStop.id || it.name == targetStop.name }
+                            ?: updatedState.activeStop
                     } else {
-                        updatedState.stops.firstOrNull()
+                        updatedState.activeStop
                     }
 
-                    val hasCachedDeparturesForStop = matchedStop != null &&
-                        matchedStop.platforms.any { it.departures.isNotEmpty() }
-
-                    if (hasCachedDeparturesForStop) {
-                        WidgetStateManager.setState(context, updatedState, repository)
-                        WidgetStateManager.updateAllWidgets(context)
-                        return
+                    val hasCachedDeparturesForStop = matchedStop.platforms.any { it.departures.isNotEmpty() }
+                    val finalState = if (hasCachedDeparturesForStop && updatedState.activeDepartures.isNotEmpty()) {
+                        updatedState
+                    } else {
+                        updatedState.copy(cachedWarning = "No upcoming departures • Offline • Tap to retry")
                     }
+                    WidgetStateManager.setState(context, finalState, repository)
+                    WidgetStateManager.updateAllWidgets(context)
+                    return
                 }
             }
 

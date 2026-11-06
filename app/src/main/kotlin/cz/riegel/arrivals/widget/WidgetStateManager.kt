@@ -52,7 +52,7 @@ object WidgetStateManager {
         }
     }
 
-    private fun rehydrateFromCache(
+    internal fun rehydrateFromCache(
         referenceTime: Instant = Instant.now(),
         repository: DeparturesRepository
     ): ArrivalsViewState.Content? {
@@ -65,7 +65,7 @@ object WidgetStateManager {
                     response = cached.response,
                     userCoordinates = cached.coordinates,
                     referenceTime = referenceTime,
-                    cachedWarning = null
+                    cachedWarning = cached.warningBanner
                 )
             )
             if (reduced is ArrivalsViewState.Content) {
