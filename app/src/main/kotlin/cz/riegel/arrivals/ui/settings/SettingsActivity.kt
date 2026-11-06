@@ -3,10 +3,14 @@ package cz.riegel.arrivals.ui.settings
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.View
 import android.widget.ArrayAdapter
 import android.widget.Button
@@ -55,6 +59,9 @@ class SettingsActivity : AppCompatActivity() {
     private lateinit var btnSave: Button
     private lateinit var progressSave: ProgressBar
 
+    private lateinit var layoutBackgroundLocationEducation: View
+    private lateinit var btnOpenLocationSettings: Button
+
     private val permissionRequestLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
@@ -66,6 +73,7 @@ class SettingsActivity : AppCompatActivity() {
             textLocationStatus.text = "⚠ Přístup k poloze byl odepřen. Bez oprávnění nelze automaticky určit nejbližší zastávku."
             btnGrantPermission.visibility = View.VISIBLE
         }
+        updateBackgroundLocationPrompt()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -90,6 +98,8 @@ class SettingsActivity : AppCompatActivity() {
         spinnerSimulatedHubs = findViewById(R.id.spinnerSimulatedHubs)
         btnSave = findViewById(R.id.btnSave)
         progressSave = findViewById(R.id.progressSave)
+        layoutBackgroundLocationEducation = findViewById(R.id.layoutBackgroundLocationEducation)
+        btnOpenLocationSettings = findViewById(R.id.btnOpenLocationSettings)
 
         // Setup simulation hub dropdown
         val hubNames = SettingsRepository.SIMULATION_HUBS.map { it.name }
@@ -118,6 +128,14 @@ class SettingsActivity : AppCompatActivity() {
             saveSettings()
         }
 
+        layoutBackgroundLocationEducation.setOnClickListener {
+            openApplicationDetailsSettings()
+        }
+
+        btnOpenLocationSettings.setOnClickListener {
+            openApplicationDetailsSettings()
+        }
+
         // Check permissions or refresh location on startup
         checkPermissionsAndLoadLocation()
     }
@@ -134,6 +152,7 @@ class SettingsActivity : AppCompatActivity() {
             btnGrantPermission.visibility = View.GONE
             refreshLocationStatus()
         }
+        updateBackgroundLocationPrompt()
     }
 
     private fun requestLocationPermissions() {
@@ -292,5 +311,39 @@ class SettingsActivity : AppCompatActivity() {
         ArrivalsUpdateWorker.enqueueOneTimeWork(this)
 
         finish()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        updateBackgroundLocationPrompt()
+    }
+
+    private fun isBackgroundLocationGranted(): Boolean {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        } else {
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED || ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        }
+    }
+
+    private fun updateBackgroundLocationPrompt() {
+        val granted = isBackgroundLocationGranted()
+        layoutBackgroundLocationEducation.visibility = if (granted) View.GONE else View.VISIBLE
+    }
+
+    private fun openApplicationDetailsSettings() {
+        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", packageName, null)
+        }
+        startActivity(intent)
     }
 }

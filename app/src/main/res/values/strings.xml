@@ -23,6 +23,9 @@
     <string name="location_section_title">GPS Location &amp; Stop Preview</string>
     <string name="refresh_location">Refresh GPS Fix</string>
     <string name="grant_permission">Grant Location Permission</string>
+    <string name="background_location_title">Background Location Access</string>
+    <string name="background_location_explanation">For the Prague Transit Arrivals widget to automatically update departure times while your screen is off or the app is closed, please allow location access &quot;Allow all the time&quot; in system settings.</string>
+    <string name="open_location_settings">Open Settings</string>
     <string name="simulation_section_title">Prague Stop Simulation (for Emulators / Testing)</string>
     <string name="testing_connection">Testing connection to Golemio…</string>
     <string name="saving">Saving settings…</string>

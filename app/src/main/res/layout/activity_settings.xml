@@ -151,6 +151,44 @@
             </LinearLayout>
         </LinearLayout>
 
+        <!-- Background Location Educational Card -->
+        <LinearLayout
+            android:id="@+id/layoutBackgroundLocationEducation"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="12dp"
+            android:background="#2E2818"
+            android:orientation="vertical"
+            android:padding="14dp"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/textBackgroundLocationTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="@string/background_location_title"
+                android:textColor="#FFCC00"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/textBackgroundLocationExplanation"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:lineSpacingExtra="2dp"
+                android:text="@string/background_location_explanation"
+                android:textColor="#E0E0E0"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/btnOpenLocationSettings"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="@string/open_location_settings" />
+        </LinearLayout>
+
         <!-- Simulation Hub Selector (for Emulators / Testing) -->
         <TextView
             android:layout_width="wrap_content"

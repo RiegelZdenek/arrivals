@@ -23,6 +23,9 @@
     <string name="location_section_title">GPS poloha a náhled zastávky</string>
     <string name="refresh_location">Aktualizovat GPS polohu</string>
     <string name="grant_permission">Povolit přístup k poloze</string>
+    <string name="background_location_title">Přístup k poloze na pozadí</string>
+    <string name="background_location_explanation">Aby widget Odjezdy Praha mohl automaticky aktualizovat odjezdy i při vypnuté obrazovce nebo zavřené aplikaci, povolte v nastavení systému přístup k poloze &quot;Povolit vždy&quot;.</string>
+    <string name="open_location_settings">Otevřít nastavení</string>
     <string name="simulation_section_title">Simulace pražské zastávky (pro emulátor / testování)</string>
     <string name="testing_connection">Ověřování připojení k API Golemio…</string>
     <string name="saving">Ukládání nastavení…</string>
