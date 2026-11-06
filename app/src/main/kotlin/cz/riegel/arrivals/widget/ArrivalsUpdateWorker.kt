@@ -33,9 +33,11 @@ class ArrivalsUpdateWorker(
 ) : CoroutineWorker(appContext, workerParams) {
 
     private val settingsRepository = SettingsRepository(appContext)
-    private val departuresRepository = DeparturesRepository.create(appContext)
-    private val engine = ArrivalsEngine()
+    internal var departuresRepository: DeparturesRepository = DeparturesRepository.create(appContext)
+    internal var transitDataSource: TransitDataSource? = null
+    internal var engine: ArrivalsEngine = ArrivalsEngine()
     internal var locationResolver: LocationResolver = LocationResolver.create(appContext)
+    internal var clock: () -> Instant = { Instant.now() }
 
     override suspend fun doWork(): Result {
         val apiKey = settingsRepository.getApiKey()
@@ -52,16 +54,52 @@ class ArrivalsUpdateWorker(
             WidgetStateManager.updateAllWidgets(appContext)
         }
 
-        val transitDataSource = TransitDataSource.create(appContext) { apiKey }
-        val now = Instant.now()
+        val transitDataSource = this.transitDataSource ?: TransitDataSource.create(appContext) { apiKey }
+        val now = clock()
 
-        // 1. Resolve coordinates (High-Accuracy GPS or 30-min underground fallback per ADR-0003)
+        // 1. Resolve coordinates (High-Accuracy GPS or 15-min underground fallback per ADR-0003)
         val locationResolution = departuresRepository.resolveLocation(
             freshCoordinates = getFreshLocation(),
             currentTime = now
         )
 
         if (locationResolution == null) {
+            val currentWidgetState = WidgetStateManager.getState(appContext, now, departuresRepository)
+            val baseState = currentWidgetState as? ArrivalsViewState.Content
+                ?: WidgetStateManager.rehydrateFromCache(now, departuresRepository)
+            val activeStop = baseState?.activeStop
+
+            if (activeStop != null) {
+                val fetchResult = transitDataSource.fetchDeparturesForStops(listOf(activeStop.name))
+                if (fetchResult.isSuccess) {
+                    val apiSuccessResponse = fetchResult.getOrThrow()
+                    if (apiSuccessResponse.departures.isNotEmpty() || apiSuccessResponse.stops.isNotEmpty()) {
+                        departuresRepository.saveDepartures(apiSuccessResponse, now)
+                        val warningBanner = "GPS unavailable • Showing ${activeStop.name}"
+                        val finalState = engine.reduce(
+                            baseState,
+                            ArrivalsAction.IngestApiResponse(
+                                response = apiSuccessResponse,
+                                userCoordinates = null,
+                                referenceTime = now,
+                                cachedWarning = warningBanner
+                            )
+                        )
+                        WidgetStateManager.setState(appContext, finalState, departuresRepository)
+                        WidgetStateManager.updateAllWidgets(appContext)
+                        return Result.success()
+                    }
+                }
+
+                // If active stop query fails or returns empty, fall back to restoreCachedDepartures
+                restoreCachedDepartures(
+                    now = now,
+                    userCoords = null,
+                    fallbackErrorMessage = fetchResult.exceptionOrNull()?.message
+                )
+                return Result.success()
+            }
+
             handleNoValidLocation(now)
             return Result.success()
         }

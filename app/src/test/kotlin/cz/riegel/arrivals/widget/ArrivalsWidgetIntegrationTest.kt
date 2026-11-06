@@ -3,7 +3,12 @@ package cz.riegel.arrivals.widget
 import android.content.Context
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
+import androidx.work.testing.TestListenableWorkerBuilder
 import cz.riegel.arrivals.data.DeparturesRepository
+import cz.riegel.arrivals.data.FakeTransitDataSource
+import cz.riegel.arrivals.data.InMemoryDeparturesRepository
+import cz.riegel.arrivals.data.LocationResolver
+import cz.riegel.arrivals.data.SettingsRepository
 import cz.riegel.arrivals.data.model.GolemioDepartureBoardResponse
 import cz.riegel.arrivals.data.model.GolemioDepartureDto
 import cz.riegel.arrivals.data.model.GolemioDepartureStopDto
@@ -700,5 +705,66 @@ class ArrivalsWidgetIntegrationTest {
         assertTrue(state.isLoadingDepartures)
         assertEquals(2, skeletonRowCountForHeight(110.dp))
         assertEquals(4, skeletonRowCountForHeight(180.dp))
+    }
+
+    @Test
+    fun undergroundFallback_whenGpsLostHeadingUnderground_queriesActiveStopByNameAndDisplaysWarningBanner() = runBlocking {
+        val now = Instant.parse("2026-10-23T14:30:00Z")
+        val repository = InMemoryDeparturesRepository()
+        SettingsRepository(context).saveApiKey("test-key")
+
+        // Commuter selected Muzeum before heading underground into the metro
+        val muzeumStop = sampleStop("s_muz", "Muzeum", listOf("A", "C"))
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(muzeumStop),
+                activeStopIndex = 0,
+                activePlatformCode = "A"
+            ),
+            repository = repository
+        )
+
+        // Metro underground environment: GPS signal completely lost
+        val fakeDataSource = FakeTransitDataSource()
+        val undergroundLiveResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "s_muz_A", stopName = "Muzeum", platformCode = "A")
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.plusSeconds(90).toString(),
+                        predicted = now.plusSeconds(90).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "s_muz_A", name = "Muzeum", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "A", type = 1),
+                    trip = GolemioTripDto(headsign = "Nemocnice Motol")
+                )
+            )
+        )
+        fakeDataSource.setResponseForStop("Muzeum", Result.success(undergroundLiveResponse))
+
+        val worker = TestListenableWorkerBuilder<ArrivalsUpdateWorker>(context).build()
+        worker.locationResolver = object : LocationResolver {
+            override suspend fun resolveLocation(highAccuracyTimeoutMs: Long, balancedTimeoutMs: Long): android.location.Location? = null
+            override suspend fun getLastKnownLocation(): android.location.Location? = null
+        }
+        worker.departuresRepository = repository
+        worker.transitDataSource = fakeDataSource
+        worker.clock = { now }
+
+        val result = worker.doWork()
+
+        assertEquals(androidx.work.ListenableWorker.Result.success(), result)
+        assertEquals(listOf("Muzeum"), fakeDataSource.stopsCalls.map { it.stopNames }.flatten())
+
+        val state = WidgetStateManager.getState(context, now, repository = repository) as ArrivalsViewState.Content
+        assertEquals("Muzeum", state.activeStop.name)
+        assertEquals("A", state.activePlatformCode)
+        assertEquals("GPS unavailable • Showing Muzeum", state.cachedWarning)
+        assertEquals(1, state.activeDepartures.size)
+        assertEquals("A", state.activeDepartures.first().line.name)
+        assertEquals("Nemocnice Motol", state.activeDepartures.first().terminus)
     }
 }
