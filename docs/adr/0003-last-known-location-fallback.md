@@ -1,3 +1,3 @@
-# Last-Known Location Fallback for Underground Stations
+# Background Location Access and 15-Minute Underground Fallback
 
-We will cache the user's last-known GPS coordinates and accept fixes up to 30 minutes old when underground or when satellite locks fail. This allows commuters entering Prague's deep metro stations to continue refreshing real-time departure boards without hard location failure.
+To allow the home screen widget to detect the user's current stop while walking around without opening the Settings activity, the app requests `ACCESS_BACKGROUND_LOCATION` ("Allow all the time") and `FOREGROUND_SERVICE_LOCATION`, resolving coordinates across high-accuracy GPS, balanced network triangulation (`PRIORITY_BALANCED_POWER_ACCURACY`), and `lastLocation`. When satellite and network locks fail (such as inside deep metro stations), we accept cached Location Fixes up to 15 minutes old, and fall back to querying live departures for the currently active Stop by name if no valid Location Fix is available.

@@ -31,3 +31,12 @@ _Avoid_: Headsign, Destination, Direction
 **Transport Mode**:
 The category of transit vehicle serving a platform, primarily Metro, Tram, Bus, Trolleybus, and Train.
 _Avoid_: Vehicle Type, Category
+
+
+**Location Fix**:
+The geographic coordinates (latitude and longitude) of the user acquired via device location services, used to calculate proximity to nearby Stops and Platforms.
+_Avoid_: GPS Lock, Position, User Location
+
+**Cached Departures**:
+Previously retrieved Departure records retained on-device to ensure uninterrupted Departure Board display when network connectivity or fresh Location Fixes are temporarily unavailable.
+_Avoid_: Stale Data, Offline Cache, Snapshot
