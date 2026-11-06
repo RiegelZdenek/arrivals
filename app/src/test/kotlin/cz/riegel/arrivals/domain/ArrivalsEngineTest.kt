@@ -463,6 +463,219 @@ class ArrivalsEngineTest {
         assertEquals(PickerMode.PlatformPicker, refreshedAfterPlatformPicker.pickerMode)
     }
 
+
+    @Test
+    fun ingestApiResponse_whenDisplacementExceeds50Meters_snapsToClosestStopAndDefaultPlatform() {
+        val stopNear = Stop(
+            id = "I. P. Pavlova",
+            name = "I. P. Pavlova",
+            lat = 50.0754,
+            lon = 14.4301,
+            platforms = listOf(
+                Platform("p_a", "A", 50.0754, 14.4301),
+                Platform("p_b", "B", 50.0758, 14.4306)
+            )
+        )
+        val stopFar = Stop(
+            id = "Karlovo náměstí",
+            name = "Karlovo náměstí",
+            lat = 50.0760,
+            lon = 14.4200,
+            platforms = listOf(
+                Platform("p_1", "1", 50.0760, 14.4200),
+                Platform("p_2", "2", 50.0765, 14.4210)
+            )
+        )
+        val rawStops = listOf(
+            GolemioStopDto("p_1", "Karlovo náměstí", "1", 50.0760, 14.4200),
+            GolemioStopDto("p_2", "Karlovo náměstí", "2", 50.0765, 14.4210),
+            GolemioStopDto("p_a", "I. P. Pavlova", "A", 50.0754, 14.4301),
+            GolemioStopDto("p_b", "I. P. Pavlova", "B", 50.0758, 14.4306)
+        )
+
+        val previousCoords = Coordinates(50.0760, 14.4200) // Near Karlovo náměstí
+        val newCoords = Coordinates(50.0754, 14.4301) // Near I. P. Pavlova (~750m away, > 50m)
+
+        val stateAtKarlovoNamesti = ArrivalsViewState.Content(
+            stops = listOf(stopFar, stopNear),
+            activeStopIndex = 0,
+            activePlatformCode = "2",
+            userCoordinates = previousCoords
+        )
+
+        val reduced = engine.reduce(
+            stateAtKarlovoNamesti,
+            ArrivalsAction.IngestApiResponse(
+                response = GolemioDepartureBoardResponse(stops = rawStops),
+                userCoordinates = newCoords,
+                referenceTime = now
+            )
+        ) as ArrivalsViewState.Content
+
+        assertEquals(0, reduced.activeStopIndex)
+        assertEquals("I. P. Pavlova", reduced.activeStop.name)
+        assertEquals("A", reduced.activePlatformCode)
+    }
+
+    @Test
+    fun ingestApiResponse_whenDisplacementWithin50Meters_preservesSelectedStopAndPlatform() {
+        val stopNear = Stop(
+            id = "I. P. Pavlova",
+            name = "I. P. Pavlova",
+            lat = 50.0754,
+            lon = 14.4301,
+            platforms = listOf(
+                Platform("p_a", "A", 50.0754, 14.4301),
+                Platform("p_b", "B", 50.0758, 14.4306)
+            )
+        )
+        val stopFar = Stop(
+            id = "Karlovo náměstí",
+            name = "Karlovo náměstí",
+            lat = 50.0760,
+            lon = 14.4200,
+            platforms = listOf(
+                Platform("p_1", "1", 50.0760, 14.4200),
+                Platform("p_2", "2", 50.0765, 14.4210)
+            )
+        )
+        val rawStops = listOf(
+            GolemioStopDto("p_a", "I. P. Pavlova", "A", 50.0754, 14.4301),
+            GolemioStopDto("p_b", "I. P. Pavlova", "B", 50.0758, 14.4306),
+            GolemioStopDto("p_1", "Karlovo náměstí", "1", 50.0760, 14.4200),
+            GolemioStopDto("p_2", "Karlovo náměstí", "2", 50.0765, 14.4210)
+        )
+
+        val previousCoords = Coordinates(50.0760, 14.4200)
+        // Move ~24 meters (<= 50m)
+        val slightlyMovedCoords = Coordinates(50.07622, 14.4200)
+        assertTrue(
+            "Displacement should be <= 50m",
+            engine.calculateDistanceMeters(previousCoords, slightlyMovedCoords) <= 50
+        )
+
+        val stateAtKarlovoNamesti = ArrivalsViewState.Content(
+            stops = listOf(stopNear, stopFar),
+            activeStopIndex = 1,
+            activePlatformCode = "2",
+            userCoordinates = previousCoords
+        )
+
+        val reduced = engine.reduce(
+            stateAtKarlovoNamesti,
+            ArrivalsAction.IngestApiResponse(
+                response = GolemioDepartureBoardResponse(stops = rawStops),
+                userCoordinates = slightlyMovedCoords,
+                referenceTime = now
+            )
+        ) as ArrivalsViewState.Content
+
+        assertEquals("Karlovo náměstí", reduced.activeStop.name)
+        assertEquals(0, reduced.activeStopIndex) // Karlovo náměstí is index 0 for coords at 50.07622
+        assertEquals("2", reduced.activePlatformCode)
+    }
+
+    @Test
+    fun ingestApiResponse_whenDisplacementExceeds50MetersAtSameStop_resetsPlatformToDefault() {
+        val stop = Stop(
+            id = "I. P. Pavlova",
+            name = "I. P. Pavlova",
+            lat = 50.0754,
+            lon = 14.4301,
+            platforms = listOf(
+                Platform("p_a", "A", 50.0754, 14.4301),
+                Platform("p_b", "B", 50.0758, 14.4306)
+            )
+        )
+        val rawStops = listOf(
+            GolemioStopDto("p_a", "I. P. Pavlova", "A", 50.0754, 14.4301),
+            GolemioStopDto("p_b", "I. P. Pavlova", "B", 50.0758, 14.4306)
+        )
+
+        val previousCoords = Coordinates(50.0758, 14.4306) // Near Platform B
+        // Move ~116 meters south towards and past Platform A (> 50m displacement, closer to Platform A)
+        val movedCoords = Coordinates(50.0748, 14.4301)
+        assertTrue(
+            "Displacement should be > 50m",
+            engine.calculateDistanceMeters(previousCoords, movedCoords) > 50
+        )
+
+        // User manually selected platform B previously
+        val stateWithPlatformB = ArrivalsViewState.Content(
+            stops = listOf(stop),
+            activeStopIndex = 0,
+            activePlatformCode = "B",
+            userCoordinates = previousCoords
+        )
+
+        val reduced = engine.reduce(
+            stateWithPlatformB,
+            ArrivalsAction.IngestApiResponse(
+                response = GolemioDepartureBoardResponse(stops = rawStops),
+                userCoordinates = movedCoords,
+                referenceTime = now
+            )
+        ) as ArrivalsViewState.Content
+
+        assertEquals(0, reduced.activeStopIndex)
+        // Since user moved > 50m, platform resets to default closest platform (Platform A)
+        assertEquals("A", reduced.activePlatformCode)
+    }
+
+    @Test
+    fun ingestApiResponse_whenPreviousUserCoordinatesNull_snapsToClosestStopAndDefaultPlatform() {
+        val stopNear = Stop(
+            id = "I. P. Pavlova",
+            name = "I. P. Pavlova",
+            lat = 50.0754,
+            lon = 14.4301,
+            platforms = listOf(
+                Platform("p_a", "A", 50.0754, 14.4301),
+                Platform("p_b", "B", 50.0758, 14.4306)
+            )
+        )
+        val stopFar = Stop(
+            id = "Karlovo náměstí",
+            name = "Karlovo náměstí",
+            lat = 50.0760,
+            lon = 14.4200,
+            platforms = listOf(
+                Platform("p_1", "1", 50.0760, 14.4200),
+                Platform("p_2", "2", 50.0765, 14.4210)
+            )
+        )
+        val rawStops = listOf(
+            GolemioStopDto("p_1", "Karlovo náměstí", "1", 50.0760, 14.4200),
+            GolemioStopDto("p_2", "Karlovo náměstí", "2", 50.0765, 14.4210),
+            GolemioStopDto("p_a", "I. P. Pavlova", "A", 50.0754, 14.4301),
+            GolemioStopDto("p_b", "I. P. Pavlova", "B", 50.0758, 14.4306)
+        )
+
+        // Previous state has null userCoordinates, activeStopIndex = 1 ("Karlovo náměstí")
+        val stateWithoutCoords = ArrivalsViewState.Content(
+            stops = listOf(stopNear, stopFar),
+            activeStopIndex = 1,
+            activePlatformCode = "2",
+            userCoordinates = null
+        )
+
+        val firstFixCoords = Coordinates(50.0754, 14.4301) // At I. P. Pavlova
+
+        val reduced = engine.reduce(
+            stateWithoutCoords,
+            ArrivalsAction.IngestApiResponse(
+                response = GolemioDepartureBoardResponse(stops = rawStops),
+                userCoordinates = firstFixCoords,
+                referenceTime = now
+            )
+        ) as ArrivalsViewState.Content
+
+        assertEquals(0, reduced.activeStopIndex)
+        assertEquals("I. P. Pavlova", reduced.activeStop.name)
+        assertEquals("A", reduced.activePlatformCode)
+    }
+
+
     @Test
     fun stateReducer_updateDataFallsBackWhenSelectedPlatformOrStopOrPickerPreconditionDisappears() {
         val stopNear = Stop(
