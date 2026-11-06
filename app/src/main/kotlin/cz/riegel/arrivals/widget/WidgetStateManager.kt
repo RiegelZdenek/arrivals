@@ -9,8 +9,13 @@ import cz.riegel.arrivals.domain.ArrivalsAction
 import cz.riegel.arrivals.domain.ArrivalsEngine
 import cz.riegel.arrivals.domain.ArrivalsViewState
 import cz.riegel.arrivals.domain.PickerMode
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.time.Instant
 
 object WidgetStateManager {
@@ -19,6 +24,8 @@ object WidgetStateManager {
     val stateFlow = _stateFlow.asStateFlow()
     private val GLANCE_STATE_VERSION_KEY = longPreferencesKey("glance_state_version")
     private var versionCounter = 0L
+
+    internal var refreshScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun getState(
         context: Context,
@@ -163,14 +170,25 @@ object WidgetStateManager {
 
     suspend fun onRefresh(
         context: Context,
-        repository: DeparturesRepository = DeparturesRepository.create(context)
-    ) {
+        repository: DeparturesRepository = DeparturesRepository.create(context),
+        scope: CoroutineScope = refreshScope
+    ): Job {
         val current = getState(context, repository = repository)
         val next = engine.reduce(current, ArrivalsAction.Refresh)
         setState(context, next, repository)
         updateAllWidgets(context)
 
-        ArrivalsUpdateWorker.enqueueOneTimeWork(context)
+        ArrivalsUpdateWorker.enqueueExpeditedOneTimeWork(context)
+
+        return scope.launch {
+            try {
+                ArrivalsUpdateWorker.executeUpdate(
+                    appContext = context.applicationContext,
+                    departuresRepository = repository
+                )
+            } catch (_: Exception) {
+            }
+        }
     }
 
     suspend fun updateAllWidgets(context: Context) {
