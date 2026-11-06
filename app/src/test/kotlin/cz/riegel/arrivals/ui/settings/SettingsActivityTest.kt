@@ -230,6 +230,6 @@ class SettingsActivityTest {
         val btnRefresh = activity.findViewById<Button>(R.id.btnRefreshLocation)
         btnRefresh.performClick()
 
-        assertEquals("Manual refresh must pass 10-second timeout for satellite GPS lock", 10_000L, requestedTimeout)
+        assertEquals("Manual refresh must pass 10-second timeout for satellite Location Fix", 10_000L, requestedTimeout)
     }
 }
