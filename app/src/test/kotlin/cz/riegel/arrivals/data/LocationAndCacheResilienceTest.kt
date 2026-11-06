@@ -2,6 +2,7 @@ package cz.riegel.arrivals.data
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import androidx.work.testing.TestListenableWorkerBuilder
 import cz.riegel.arrivals.data.model.GolemioDepartureBoardResponse
 import cz.riegel.arrivals.data.model.GolemioDepartureDto
 import cz.riegel.arrivals.data.model.GolemioDepartureStopDto
@@ -87,20 +88,20 @@ class LocationAndCacheResilienceTest {
     }
 
     @Test
-    fun resolveLocation_acceptsStaleLocationUpTo30MinutesWithUndergroundWarningBanner() {
+    fun resolveLocation_acceptsStaleLocationUpTo15MinutesWithUndergroundWarningBanner() {
         val now = Instant.parse("2026-10-23T14:30:00Z")
-        val twentyMinutesAgo = now.minusSeconds(20 * 60)
+        val twelveMinutesAgo = now.minusSeconds(12 * 60)
         val cachedCoordinates = Coordinates(lat = 50.0755, lon = 14.4302)
 
         for (repository in adaptersUnderTest()) {
-            repository.saveLocation(cachedCoordinates, observedAt = twentyMinutesAgo)
+            repository.saveLocation(cachedCoordinates, observedAt = twelveMinutesAgo)
 
             val result = repository.resolveLocation(
                 freshCoordinates = null,
                 currentTime = now
             )
 
-            assertNotNull("Should accept cached location up to 30 min old (ADR-0003)", result)
+            assertNotNull("Should accept cached location up to 15 min old (ADR-0003)", result)
             assertTrue(result is LocationResolution.UndergroundFallback)
             val fallback = result as LocationResolution.UndergroundFallback
             assertEquals(cachedCoordinates, fallback.coordinates)
@@ -109,20 +110,20 @@ class LocationAndCacheResilienceTest {
     }
 
     @Test
-    fun resolveLocation_rejectsStaleLocationOlderThan30Minutes() {
+    fun resolveLocation_rejectsStaleLocationOlderThan15Minutes() {
         val now = Instant.parse("2026-10-23T14:30:00Z")
-        val thirtyOneMinutesAgo = now.minusSeconds(31 * 60)
+        val sixteenMinutesAgo = now.minusSeconds(16 * 60)
         val cachedCoordinates = Coordinates(lat = 50.0755, lon = 14.4302)
 
         for (repository in adaptersUnderTest()) {
-            repository.saveLocation(cachedCoordinates, observedAt = thirtyOneMinutesAgo)
+            repository.saveLocation(cachedCoordinates, observedAt = sixteenMinutesAgo)
 
             val result = repository.resolveLocation(
                 freshCoordinates = null,
                 currentTime = now
             )
 
-            assertNull("Should reject cached location older than 30 minutes", result)
+            assertNull("Should reject cached location older than 15 minutes", result)
         }
     }
 
@@ -703,5 +704,207 @@ class LocationAndCacheResilienceTest {
         assertTrue("Tier 3 should be checked in getLastKnownLocation", tier3Called)
         assertTrue("Tier 4 should be checked when Tier 3 misses in getLastKnownLocation", tier4Called)
         assertEquals(expectedLocation, result)
+    }
+
+    @Test
+    fun worker_whenLocationUnavailable_andActiveStopPresent_fallsBackToStopNameQueryWithWarningBanner() = runBlocking {
+        val repository = InMemoryDeparturesRepository()
+        val now = Instant.parse("2026-10-23T14:30:00Z")
+        SettingsRepository(context).saveApiKey("test-key")
+
+        val andelStop = Stop("U100Z1", "Anděl", platforms = listOf(Platform("U100Z1", "A")))
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(andelStop),
+                activeStopIndex = 0,
+                activePlatformCode = "A"
+            ),
+            repository = repository
+        )
+
+        val fakeDataSource = FakeTransitDataSource()
+        val liveResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "U100Z1", stopName = "Anděl", platformCode = "A")
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.plusSeconds(180).toString(),
+                        predicted = now.plusSeconds(180).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "U100Z1", name = "Anděl", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "9", type = 0),
+                    trip = GolemioTripDto(headsign = "Sídliště Řepy")
+                )
+            )
+        )
+        fakeDataSource.setResponseForStop("Anděl", Result.success(liveResponse))
+
+        val worker = TestListenableWorkerBuilder<ArrivalsUpdateWorker>(context).build()
+        worker.locationResolver = object : LocationResolver {
+            override suspend fun resolveLocation(highAccuracyTimeoutMs: Long, balancedTimeoutMs: Long): android.location.Location? = null
+            override suspend fun getLastKnownLocation(): android.location.Location? = null
+        }
+        worker.departuresRepository = repository
+        worker.transitDataSource = fakeDataSource
+        worker.clock = { now }
+
+        val workerResult = worker.doWork()
+
+        assertEquals(androidx.work.ListenableWorker.Result.success(), workerResult)
+        assertEquals(listOf("Anděl"), fakeDataSource.stopsCalls.map { it.stopNames }.flatten())
+
+        val state = WidgetStateManager.getState(context, now, repository = repository)
+        assertTrue("State should be Content", state is ArrivalsViewState.Content)
+        val content = state as ArrivalsViewState.Content
+        assertEquals("Anděl", content.activeStop.name)
+        assertEquals(1, content.activeDepartures.size)
+        assertEquals("9", content.activeDepartures.first().line.name)
+        assertEquals("GPS unavailable • Showing Anděl", content.cachedWarning)
+    }
+
+    @Test
+    fun worker_whenLocationStaleBeyond15Minutes_andActiveStopPresent_fallsBackToStopNameQueryWithWarningBanner() = runBlocking {
+        val repository = InMemoryDeparturesRepository()
+        val now = Instant.parse("2026-10-23T14:30:00Z")
+        val twentyMinutesAgo = now.minusSeconds(20 * 60)
+        repository.saveLocation(Coordinates(lat = 50.0755, lon = 14.4302), observedAt = twentyMinutesAgo)
+        SettingsRepository(context).saveApiKey("test-key")
+
+        val namestiMiruStop = Stop("U200Z1", "Náměstí Míru", platforms = listOf(Platform("U200Z1", "A")))
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(namestiMiruStop),
+                activeStopIndex = 0,
+                activePlatformCode = "A"
+            ),
+            repository = repository
+        )
+
+        val fakeDataSource = FakeTransitDataSource()
+        val liveResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "U200Z1", stopName = "Náměstí Míru", platformCode = "A")
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.plusSeconds(120).toString(),
+                        predicted = now.plusSeconds(120).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "U200Z1", name = "Náměstí Míru", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "A", type = 1),
+                    trip = GolemioTripDto(headsign = "Depo Hostivař")
+                )
+            )
+        )
+        fakeDataSource.setResponseForStop("Náměstí Míru", Result.success(liveResponse))
+
+        val worker = TestListenableWorkerBuilder<ArrivalsUpdateWorker>(context).build()
+        worker.locationResolver = object : LocationResolver {
+            override suspend fun resolveLocation(highAccuracyTimeoutMs: Long, balancedTimeoutMs: Long): android.location.Location? = null
+            override suspend fun getLastKnownLocation(): android.location.Location? = null
+        }
+        worker.departuresRepository = repository
+        worker.transitDataSource = fakeDataSource
+        worker.clock = { now }
+
+        val workerResult = worker.doWork()
+
+        assertEquals(androidx.work.ListenableWorker.Result.success(), workerResult)
+        assertEquals(listOf("Náměstí Míru"), fakeDataSource.stopsCalls.map { it.stopNames }.flatten())
+
+        val state = WidgetStateManager.getState(context, now, repository = repository)
+        assertTrue("State should be Content", state is ArrivalsViewState.Content)
+        val content = state as ArrivalsViewState.Content
+        assertEquals("Náměstí Míru", content.activeStop.name)
+        assertEquals("GPS unavailable • Showing Náměstí Míru", content.cachedWarning)
+    }
+
+    @Test
+    fun worker_whenActiveStopQueryFails_fallsBackToRestoreCachedDepartures() = runBlocking {
+        val repository = InMemoryDeparturesRepository()
+        val now = Instant.parse("2026-10-23T14:30:00Z")
+        val fetchTime = Instant.parse("2026-10-23T14:28:00Z") // 16:28 in Prague
+        SettingsRepository(context).saveApiKey("test-key")
+
+        val cachedResponse = GolemioDepartureBoardResponse(
+            stops = listOf(GolemioStopDto(stopId = "U100Z1", stopName = "Anděl", platformCode = "A")),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.plusSeconds(300).toString(),
+                        predicted = now.plusSeconds(300).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "U100Z1", name = "Anděl", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "9", type = 0),
+                    trip = GolemioTripDto(headsign = "Sídliště Řepy")
+                )
+            )
+        )
+        repository.saveDepartures(cachedResponse, fetchTime)
+
+        val andelStop = Stop("U100Z1", "Anděl", platforms = listOf(Platform("U100Z1", "A")))
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(andelStop),
+                activeStopIndex = 0,
+                activePlatformCode = "A"
+            ),
+            repository = repository
+        )
+
+        val fakeDataSource = FakeTransitDataSource()
+        fakeDataSource.setResponseForStop("Anděl", Result.failure(java.io.IOException("Network down")))
+
+        val worker = TestListenableWorkerBuilder<ArrivalsUpdateWorker>(context).build()
+        worker.locationResolver = object : LocationResolver {
+            override suspend fun resolveLocation(highAccuracyTimeoutMs: Long, balancedTimeoutMs: Long): android.location.Location? = null
+            override suspend fun getLastKnownLocation(): android.location.Location? = null
+        }
+        worker.departuresRepository = repository
+        worker.transitDataSource = fakeDataSource
+        worker.clock = { now }
+
+        val workerResult = worker.doWork()
+
+        assertEquals(androidx.work.ListenableWorker.Result.success(), workerResult)
+        val state = WidgetStateManager.getState(context, now, repository = repository)
+        assertTrue("State should be Content with cached departures", state is ArrivalsViewState.Content)
+        val content = state as ArrivalsViewState.Content
+        assertEquals("Anděl", content.activeStop.name)
+        assertEquals("Cached 16:28 • Tap to retry", content.cachedWarning)
+    }
+
+    @Test
+    fun worker_whenNoLocationAndNoActiveStop_fallsBackToLocationError() = runBlocking {
+        val now = Instant.parse("2026-10-23T14:30:00Z")
+        val repository = InMemoryDeparturesRepository()
+        SettingsRepository(context).saveApiKey("test-key")
+
+        WidgetStateManager.setState(context, ArrivalsViewState.Loading(), repository = repository)
+
+        val fakeDataSource = FakeTransitDataSource()
+
+        val worker = TestListenableWorkerBuilder<ArrivalsUpdateWorker>(context).build()
+        worker.locationResolver = object : LocationResolver {
+            override suspend fun resolveLocation(highAccuracyTimeoutMs: Long, balancedTimeoutMs: Long): android.location.Location? = null
+            override suspend fun getLastKnownLocation(): android.location.Location? = null
+        }
+        worker.departuresRepository = repository
+        worker.transitDataSource = fakeDataSource
+        worker.clock = { now }
+
+        val workerResult = worker.doWork()
+
+        assertEquals(androidx.work.ListenableWorker.Result.success(), workerResult)
+        val state = WidgetStateManager.getState(context, repository = repository)
+        assertTrue("State should be Error when no location and no active stop", state is ArrivalsViewState.Error)
+        val error = state as ArrivalsViewState.Error
+        assertTrue(error.message.contains("GPS") || error.message.contains("Location permission"))
     }
 }

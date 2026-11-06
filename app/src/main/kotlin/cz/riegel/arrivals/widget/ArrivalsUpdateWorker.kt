@@ -43,9 +43,11 @@ class ArrivalsUpdateWorker(
 ) : CoroutineWorker(appContext, workerParams) {
 
     private val settingsRepository = SettingsRepository(appContext)
-    private val departuresRepository = DeparturesRepository.create(appContext)
-    private val engine = ArrivalsEngine()
+    internal var departuresRepository: DeparturesRepository = DeparturesRepository.create(appContext)
+    internal var transitDataSource: TransitDataSource? = null
+    internal var engine: ArrivalsEngine = ArrivalsEngine()
     internal var locationResolver: LocationResolver = defaultLocationResolverProvider?.invoke(appContext) ?: LocationResolver.create(appContext)
+    internal var clock: () -> Instant = { Instant.now() }
 
     override suspend fun getForegroundInfo(): ForegroundInfo {
         val channelId = "arrivals_widget_updates"
@@ -81,7 +83,10 @@ class ArrivalsUpdateWorker(
             settingsRepository = settingsRepository,
             departuresRepository = departuresRepository,
             locationResolver = locationResolver,
-            engine = engine
+            engine = engine,
+            currentTime = clock(),
+            transitDataSource = transitDataSource,
+            force = true
         )
         return Result.success()
     }
@@ -162,6 +167,46 @@ class ArrivalsUpdateWorker(
             )
 
             if (locationResolution == null) {
+                val currentWidgetState = WidgetStateManager.getState(appContext, currentTime, departuresRepository)
+                val baseState = currentWidgetState as? ArrivalsViewState.Content
+                    ?: WidgetStateManager.rehydrateFromCache(currentTime, departuresRepository)
+                val activeStop = baseState?.activeStop
+
+                if (activeStop != null) {
+                    val dataSource = transitDataSource ?: defaultTransitDataSourceProvider?.invoke(appContext, apiKey) ?: TransitDataSource.create(appContext) { apiKey }
+                    val fetchResult = dataSource.fetchDeparturesForStops(listOf(activeStop.name))
+                    if (fetchResult.isSuccess) {
+                        val apiSuccessResponse = fetchResult.getOrThrow()
+                        if (apiSuccessResponse.departures.isNotEmpty() || apiSuccessResponse.stops.isNotEmpty()) {
+                            departuresRepository.saveDepartures(apiSuccessResponse, currentTime)
+                            val warningBanner = "GPS unavailable • Showing ${activeStop.name}"
+                            val finalState = engine.reduce(
+                                baseState,
+                                ArrivalsAction.IngestApiResponse(
+                                    response = apiSuccessResponse,
+                                    userCoordinates = null,
+                                    referenceTime = currentTime,
+                                    cachedWarning = warningBanner
+                                )
+                            )
+                            WidgetStateManager.setState(appContext, finalState, departuresRepository)
+                            WidgetStateManager.updateAllWidgets(appContext)
+                            lastSuccessfulUpdateMillis = nowMillis
+                            return true
+                        }
+                    }
+
+                    // If active stop query fails or returns empty, fall back to restoreCachedDepartures
+                    restoreCachedDepartures(
+                        context = appContext,
+                        now = currentTime,
+                        userCoords = null,
+                        fallbackErrorMessage = fetchResult.exceptionOrNull()?.message,
+                        repository = departuresRepository
+                    )
+                    return false
+                }
+
                 handleNoValidLocation(appContext, currentTime, departuresRepository)
                 return false
             }
@@ -209,11 +254,32 @@ class ArrivalsUpdateWorker(
             return false
         }
 
-        @SuppressLint("MissingPermission")
-        suspend fun getFreshLocation(
+        private suspend fun handleNoValidLocation(
             context: Context,
-            settingsRepository: SettingsRepository = SettingsRepository(context),
-            locationResolver: LocationResolver = LocationResolver.create(context)
+            now: Instant,
+            repository: DeparturesRepository
+        ) {
+            val hasFine = context.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            val hasCoarse = context.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
+            val errorMsg = if (!hasFine && !hasCoarse) {
+                "Location permission required. Tap to open Settings."
+            } else {
+                "No GPS fix available. Ensure location is enabled or select a test stop in Settings."
+            }
+            restoreCachedDepartures(
+                context = context,
+                now = now,
+                userCoords = null,
+                fallbackErrorMessage = errorMsg,
+                repository = repository
+            )
+        }
+
+        @SuppressLint("MissingPermission")
+        private suspend fun getFreshLocation(
+            context: Context,
+            settingsRepository: SettingsRepository,
+            locationResolver: LocationResolver
         ): Coordinates? {
             val simulatedHub = settingsRepository.getSelectedSimulationHub()
             if (simulatedHub != null) {
@@ -237,29 +303,8 @@ class ArrivalsUpdateWorker(
             }
         }
 
-        suspend fun handleNoValidLocation(
-            context: Context,
-            now: Instant,
-            repository: DeparturesRepository = DeparturesRepository.create(context)
-        ) {
-            val hasFine = context.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            val hasCoarse = context.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) == android.content.pm.PackageManager.PERMISSION_GRANTED
-            val errorMsg = if (!hasFine && !hasCoarse) {
-                "Location permission required. Tap to open Settings."
-            } else {
-                "No GPS fix available. Ensure location is enabled or select a test stop in Settings."
-            }
-            restoreCachedDepartures(
-                context = context,
-                now = now,
-                userCoords = null,
-                fallbackErrorMessage = errorMsg,
-                repository = repository
-            )
-        }
-
         @SuppressLint("MissingPermission")
-        fun getLocationFromLocationManager(context: Context): Location? {
+        private fun getLocationFromLocationManager(context: Context): Location? {
             return try {
                 val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
                 val providers = listOf(

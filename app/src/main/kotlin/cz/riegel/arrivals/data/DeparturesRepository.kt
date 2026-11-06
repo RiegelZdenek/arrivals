@@ -48,7 +48,7 @@ interface DeparturesRepository {
 
         fun create(
             context: Context,
-            maxStaleDurationMinutes: Long = 30,
+            maxStaleDurationMinutes: Long = 15,
             zoneId: ZoneId = ZoneId.of("Europe/Prague")
         ): DeparturesRepository = SharedPreferencesDeparturesRepository(
             context = context,
@@ -89,7 +89,7 @@ interface DeparturesRepository {
 
 class SharedPreferencesDeparturesRepository(
     context: Context,
-    private val maxStaleDurationMinutes: Long = 30,
+    private val maxStaleDurationMinutes: Long = 15,
     private val zoneId: ZoneId = ZoneId.of("Europe/Prague")
 ) : DeparturesRepository {
 
@@ -183,7 +183,7 @@ class SharedPreferencesDeparturesRepository(
 }
 
 class InMemoryDeparturesRepository(
-    private val maxStaleDurationMinutes: Long = 30,
+    private val maxStaleDurationMinutes: Long = 15,
     private val zoneId: ZoneId = ZoneId.of("Europe/Prague")
 ) : DeparturesRepository {
 
