@@ -30,6 +30,7 @@ interface LocationResolver {
     }
 }
 
+@SuppressLint("MissingPermission")
 class DefaultLocationResolver(
     private val context: Context,
     private val fusedClient: FusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(context),
