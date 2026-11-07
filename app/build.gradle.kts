@@ -4,6 +4,9 @@ plugins {
     id("org.jetbrains.kotlin.plugin.serialization")
 }
 
+val appVersionCode: Provider<String> = providers.gradleProperty("appVersionCode")
+val appVersionName: Provider<String> = providers.gradleProperty("appVersionName")
+
 android {
     namespace = "cz.riegel.arrivals"
     compileSdk = 35
@@ -12,8 +15,8 @@ android {
         applicationId = "cz.riegel.arrivals"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-beta"
+        versionCode = appVersionCode.map { it.toInt() }.getOrElse(1)
+        versionName = appVersionName.getOrElse("0.1.0-beta")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
