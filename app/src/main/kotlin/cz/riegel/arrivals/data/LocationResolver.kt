@@ -30,33 +30,18 @@ interface LocationResolver {
     }
 }
 
-@SuppressLint("MissingPermission")
 class DefaultLocationResolver(
     private val context: Context,
     private val fusedClient: FusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(context),
     private val locationManager: LocationManager? = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager,
     private val queryHighAccuracy: suspend (timeoutMs: Long) -> Location? = { timeoutMs ->
-        val cts = CancellationTokenSource()
-        try {
-            withTimeoutOrNull(timeoutMs) {
-                fusedClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, cts.token).await()
-            }
-        } finally {
-            cts.cancel()
-        }
+        fetchCurrentLocation(fusedClient, Priority.PRIORITY_HIGH_ACCURACY, timeoutMs)
     },
     private val queryBalancedPower: suspend (timeoutMs: Long) -> Location? = { timeoutMs ->
-        val cts = CancellationTokenSource()
-        try {
-            withTimeoutOrNull(timeoutMs) {
-                fusedClient.getCurrentLocation(Priority.PRIORITY_BALANCED_POWER_ACCURACY, cts.token).await()
-            }
-        } finally {
-            cts.cancel()
-        }
+        fetchCurrentLocation(fusedClient, Priority.PRIORITY_BALANCED_POWER_ACCURACY, timeoutMs)
     },
     private val queryFusedLastLocation: suspend () -> Location? = {
-        fusedClient.lastLocation.await()
+        fetchLastLocation(fusedClient)
     },
     private val queryLocationManager: () -> Location? = {
         getLocationFromLocationManager(locationManager)
@@ -116,7 +101,28 @@ class DefaultLocationResolver(
     }
 
     companion object {
-        @SuppressLint("MissingPermission")
+        @SuppressLint("MissingPermission") // Caller enforces ACCESS_FINE_LOCATION or ACCESS_COARSE_LOCATION
+        suspend fun fetchCurrentLocation(
+            client: FusedLocationProviderClient,
+            priority: Int,
+            timeoutMs: Long
+        ): Location? {
+            val cts = CancellationTokenSource()
+            return try {
+                withTimeoutOrNull(timeoutMs) {
+                    client.getCurrentLocation(priority, cts.token).await()
+                }
+            } finally {
+                cts.cancel()
+            }
+        }
+
+        @SuppressLint("MissingPermission") // Caller enforces ACCESS_FINE_LOCATION or ACCESS_COARSE_LOCATION
+        suspend fun fetchLastLocation(client: FusedLocationProviderClient): Location? {
+            return client.lastLocation.await()
+        }
+
+        @SuppressLint("MissingPermission") // Caller enforces ACCESS_FINE_LOCATION or ACCESS_COARSE_LOCATION
         fun getLocationFromLocationManager(lm: LocationManager?): Location? {
             if (lm == null) return null
             return try {
