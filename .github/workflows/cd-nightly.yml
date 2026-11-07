@@ -1,0 +1,111 @@
+name: Nightly CD
+
+on:
+  schedule:
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: cd-nightly
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  nightly:
+    name: Build & Publish Nightly Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run Unit Tests
+        run: ./gradlew testDebugUnitTest
+
+      - name: Compute dynamic version metadata
+        id: version
+        run: |
+          DATE=$(date -u +'%Y%m%d')
+          SHA=$(git rev-parse --short HEAD)
+          VERSION_CODE=$(date -u +'%s')
+          VERSION_NAME="0.1.0-nightly.${DATE}.${SHA}"
+          echo "DATE=${DATE}" >> "$GITHUB_ENV"
+          echo "SHA=${SHA}" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=${VERSION_CODE}" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease -PappVersionCode="${VERSION_CODE}" -PappVersionName="${VERSION_NAME}"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: arrivals-nightly-apk
+          path: app/build/outputs/apk/release/*.apk
+          retention-days: 14
+
+      - name: Publish GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="nightly-${DATE}"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; updating assets with clobber..."
+            gh release upload "${TAG}" app/build/outputs/apk/release/*.apk --clobber
+          else
+            echo "Creating release ${TAG}..."
+            gh release create "${TAG}" app/build/outputs/apk/release/*.apk \
+              --title "Nightly ${DATE}" \
+              --generate-notes \
+              --prerelease
+          fi
+
+      - name: Prune nightly releases older than 14 days
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - << 'EOF'
+          import datetime
+          import json
+          import subprocess
+          import sys
+
+          cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=14)
+          try:
+              raw = subprocess.check_output(
+                  ["gh", "release", "list", "--json", "tagName,createdAt", "--limit", "100"],
+                  text=True
+              )
+          except subprocess.CalledProcessError as e:
+              print(f"Failed to list releases: {e}", file=sys.stderr)
+              sys.exit(1)
+
+          releases = json.loads(raw) if raw.strip() else []
+          for r in releases:
+              tag = r.get("tagName", "")
+              created_at_str = r.get("createdAt", "")
+              if not tag.startswith("nightly-") or not created_at_str:
+                  continue
+              try:
+                  created_at = datetime.datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+              except Exception as e:
+                  print(f"Warning: could not parse timestamp '{created_at_str}' for tag '{tag}': {e}", file=sys.stderr)
+                  continue
+
+              if created_at < cutoff:
+                  print(f"Pruning release '{tag}' created at {created_at_str} (older than 14 days)")
+                  subprocess.run(["gh", "release", "delete", tag, "--cleanup-tag", "-y"], check=True)
+          EOF
