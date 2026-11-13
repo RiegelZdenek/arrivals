@@ -37,6 +37,36 @@ interface DeparturesRepository {
     fun saveDepartures(response: GolemioDepartureBoardResponse, timestamp: Instant = Instant.now())
     fun getCachedDepartures(): CachedDeparturesResult?
 
+    fun purgeCache()
+    fun clearCache() = purgeCache()
+
+    fun isCacheOutOfRange(freshCoordinates: Coordinates, searchRadiusMeters: Int): Boolean {
+        val cached = getCachedDepartures() ?: return false
+        val validStopCoords = cached.response.stops
+            .filter { it.stopLat != 0.0 && it.stopLon != 0.0 }
+            .map { Coordinates(it.stopLat, it.stopLon) }
+
+        return if (validStopCoords.isNotEmpty()) {
+            val minDistance = validStopCoords.minOf { it.distanceTo(freshCoordinates) }
+            minDistance > searchRadiusMeters
+        } else {
+            val cachedCoords = cached.coordinates
+            if (cachedCoords != null) {
+                cachedCoords.distanceTo(freshCoordinates) > searchRadiusMeters
+            } else {
+                true
+            }
+        }
+    }
+
+    fun purgeIfOutOfRange(freshCoordinates: Coordinates, searchRadiusMeters: Int): Boolean {
+        if (isCacheOutOfRange(freshCoordinates, searchRadiusMeters)) {
+            purgeCache()
+            return true
+        }
+        return false
+    }
+
     fun saveActiveSelection(stopIndex: Int, platformCode: String)
     fun getActiveStopIndex(): Int
     fun getActivePlatformCode(): String?
@@ -159,6 +189,18 @@ class SharedPreferencesDeparturesRepository(
         }
     }
 
+    override fun purgeCache() {
+        prefs.edit()
+            .remove(KEY_CACHED_PAYLOAD)
+            .remove(KEY_CACHED_TIME)
+            .remove(KEY_LAT)
+            .remove(KEY_LON)
+            .remove(KEY_COORDS_TIME)
+            .remove(KEY_ACTIVE_STOP_INDEX)
+            .remove(KEY_ACTIVE_PLATFORM_CODE)
+            .apply()
+    }
+
     override fun saveActiveSelection(stopIndex: Int, platformCode: String) {
         prefs.edit()
             .putInt(KEY_ACTIVE_STOP_INDEX, stopIndex)
@@ -220,6 +262,13 @@ class InMemoryDeparturesRepository(
             coordinates = getLastCoordinates(),
             warningBanner = DeparturesRepository.formatCachedWarning(timestamp, zoneId)
         )
+    }
+
+    override fun purgeCache() {
+        savedLocation = null
+        savedDepartures = null
+        activeStopIndex = 0
+        activePlatformCode = null
     }
 
     override fun saveActiveSelection(stopIndex: Int, platformCode: String) {

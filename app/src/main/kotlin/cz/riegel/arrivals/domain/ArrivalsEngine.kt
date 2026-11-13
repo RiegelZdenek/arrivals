@@ -106,6 +106,9 @@ class ArrivalsEngine(
             is ArrivalsAction.IngestApiResponse -> {
                 val rawStops = normalize(action.response, action.referenceTime)
                 if (rawStops.isEmpty()) {
+                    if (action.searchRadius != null) {
+                        return ArrivalsViewState.Empty.forRadius(action.searchRadius)
+                    }
                     if (state is ArrivalsViewState.Content && state.stops.isNotEmpty()) {
                         return state.copy(
                             stops = refreshCountdowns(state.stops, action.referenceTime),
@@ -123,6 +126,20 @@ class ArrivalsEngine(
                     rawStops
                 }
 
+                val inRangeStops = if (action.searchRadius != null && action.userCoordinates != null) {
+                    rankedStops.filter { (it.distanceMeters ?: Int.MAX_VALUE) <= action.searchRadius }
+                } else {
+                    rankedStops
+                }
+
+                if (inRangeStops.isEmpty()) {
+                    return if (action.searchRadius != null) {
+                        ArrivalsViewState.Empty.forRadius(action.searchRadius)
+                    } else {
+                        ArrivalsViewState.Empty()
+                    }
+                }
+
                 if (state is ArrivalsViewState.Content && state.stops.isNotEmpty()) {
                     val previousCoords = state.userCoordinates
                     val newCoords = action.userCoordinates
@@ -136,15 +153,15 @@ class ArrivalsEngine(
 
                     if (shouldSnapToClosest) {
                         resolvedStopIndex = 0
-                        resolvedStop = rankedStops.first()
+                        resolvedStop = inRangeStops.first()
                         resolvedPlatformCode = resolveDefaultPlatformCode(resolvedStop, action.userCoordinates)
                     } else {
                         val previousStop = state.activeStop
-                        val matchedStopIndex = rankedStops.indexOfFirst {
+                        val matchedStopIndex = inRangeStops.indexOfFirst {
                             it.id == previousStop.id || it.name == previousStop.name
                         }
                         resolvedStopIndex = if (matchedStopIndex >= 0) matchedStopIndex else 0
-                        resolvedStop = rankedStops[resolvedStopIndex]
+                        resolvedStop = inRangeStops[resolvedStopIndex]
                         resolvedPlatformCode = if (
                             matchedStopIndex >= 0 &&
                             resolvedStop.platforms.any { it.code == state.activePlatformCode }
@@ -157,7 +174,7 @@ class ArrivalsEngine(
 
                     val resolvedPickerMode = when (state.pickerMode) {
                         PickerMode.StopPicker -> {
-                            if (rankedStops.size > 1) PickerMode.StopPicker else PickerMode.Departures
+                            if (inRangeStops.size > 1) PickerMode.StopPicker else PickerMode.Departures
                         }
                         PickerMode.PlatformPicker -> {
                             if (resolvedStop.platforms.size > 1) PickerMode.PlatformPicker else PickerMode.Departures
@@ -165,7 +182,7 @@ class ArrivalsEngine(
                         PickerMode.Departures -> PickerMode.Departures
                     }
                     return ArrivalsViewState.Content(
-                        stops = rankedStops,
+                        stops = inRangeStops,
                         activeStopIndex = resolvedStopIndex,
                         activePlatformCode = resolvedPlatformCode,
                         userCoordinates = action.userCoordinates,
@@ -176,9 +193,9 @@ class ArrivalsEngine(
                     )
                 }
 
-                val primaryStop = rankedStops.first()
+                val primaryStop = inRangeStops.first()
                 ArrivalsViewState.Content(
-                    stops = rankedStops,
+                    stops = inRangeStops,
                     activeStopIndex = 0,
                     activePlatformCode = resolveDefaultPlatformCode(primaryStop, action.userCoordinates),
                     userCoordinates = action.userCoordinates,

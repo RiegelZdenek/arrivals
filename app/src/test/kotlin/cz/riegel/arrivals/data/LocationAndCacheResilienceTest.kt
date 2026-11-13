@@ -160,6 +160,103 @@ class LocationAndCacheResilienceTest {
     }
 
     @Test
+    fun purgeCache_clearsCachedDeparturesCoordinatesAndActiveSelectionAcrossAdapters() {
+        val now = Instant.parse("2026-10-23T14:30:00Z")
+        val coords = Coordinates(lat = 50.0839, lon = 14.4534)
+        val response = GolemioDepartureBoardResponse(
+            stops = listOf(GolemioStopDto(stopId = "U100Z1", stopName = "Lipanská", platformCode = "A"))
+        )
+
+        for (repository in adaptersUnderTest()) {
+            repository.saveLocation(coords, observedAt = now)
+            repository.saveDepartures(response, timestamp = now)
+            repository.saveActiveSelection(stopIndex = 1, platformCode = "A")
+
+            assertNotNull(repository.getCachedDepartures())
+            assertNotNull(repository.getLastCoordinates())
+            assertEquals(1, repository.getActiveStopIndex())
+            assertEquals("A", repository.getActivePlatformCode())
+
+            repository.purgeCache()
+
+            assertNull("Cached departures must be cleared on purgeCache", repository.getCachedDepartures())
+            assertNull("Coordinates must be cleared on purgeCache", repository.getLastCoordinates())
+            assertEquals(0, repository.getActiveStopIndex())
+            assertNull(repository.getActivePlatformCode())
+        }
+    }
+
+    @Test
+    fun purgeIfOutOfRange_whenFreshLocationBeyondSearchRadius_evictsCacheAndReturnsTrue() {
+        val now = Instant.parse("2026-10-23T14:30:00Z")
+        val lipanskaCoords = Coordinates(lat = 50.0839, lon = 14.4534)
+        val response = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(
+                    stopId = "U100Z1",
+                    stopName = "Lipanská",
+                    platformCode = "A",
+                    stopLat = lipanskaCoords.lat,
+                    stopLon = lipanskaCoords.lon
+                )
+            )
+        )
+
+        // Commuter travels across town (11.2 km away)
+        val distantCoords = Coordinates(lat = 50.0520, lon = 14.2950)
+        val searchRadiusMeters = 300
+
+        for (repository in adaptersUnderTest()) {
+            repository.saveLocation(lipanskaCoords, observedAt = now)
+            repository.saveDepartures(response, timestamp = now)
+            repository.saveActiveSelection(stopIndex = 0, platformCode = "A")
+
+            val evicted = repository.purgeIfOutOfRange(
+                freshCoordinates = distantCoords,
+                searchRadiusMeters = searchRadiusMeters
+            )
+
+            assertTrue("Should evict cache when fresh location is farther than search radius (11km > 300m)", evicted)
+            assertNull("Cached departures must be purged", repository.getCachedDepartures())
+            assertNull("Stored coordinates must be purged", repository.getLastCoordinates())
+        }
+    }
+
+    @Test
+    fun purgeIfOutOfRange_whenFreshLocationWithinSearchRadius_retainsCacheAndReturnsFalse() {
+        val now = Instant.parse("2026-10-23T14:30:00Z")
+        val lipanskaCoords = Coordinates(lat = 50.0839, lon = 14.4534)
+        val response = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(
+                    stopId = "U100Z1",
+                    stopName = "Lipanská",
+                    platformCode = "A",
+                    stopLat = lipanskaCoords.lat,
+                    stopLon = lipanskaCoords.lon
+                )
+            )
+        )
+
+        // Commuter is 50m away from Lipanská
+        val nearbyCoords = Coordinates(lat = 50.0842, lon = 14.4538)
+        val searchRadiusMeters = 300
+
+        for (repository in adaptersUnderTest()) {
+            repository.saveLocation(lipanskaCoords, observedAt = now)
+            repository.saveDepartures(response, timestamp = now)
+
+            val evicted = repository.purgeIfOutOfRange(
+                freshCoordinates = nearbyCoords,
+                searchRadiusMeters = searchRadiusMeters
+            )
+
+            assertFalse("Should not evict cache when fresh location is within search radius", evicted)
+            assertNotNull("Cached departures must be retained", repository.getCachedDepartures())
+        }
+    }
+
+    @Test
     fun restoreCachedDepartures_unitTest_fallbackBehaviorAndWarning() = runBlocking {
         val repository = InMemoryDeparturesRepository()
         val now = Instant.parse("2026-10-23T13:43:00Z")
@@ -937,5 +1034,147 @@ class LocationAndCacheResilienceTest {
         assertTrue("State should be Error when no location and no active stop", state is ArrivalsViewState.Error)
         val error = state as ArrivalsViewState.Error
         assertTrue(error.message.contains("GPS") || error.message.contains("Location permission"))
+    }
+
+    @Test
+    fun worker_whenFreshLocationBeyondSearchRadiusAndNoStopsFound_transitionsToEmptyStateAndPurgesCache() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        org.robolectric.Shadows.shadowOf(app).grantPermissions(android.Manifest.permission.ACCESS_FINE_LOCATION)
+
+        val repository = InMemoryDeparturesRepository()
+        val now = Instant.parse("2026-10-23T14:30:00Z")
+        val earlier = now.minusSeconds(30 * 60)
+        SettingsRepository(context).saveApiKey("test-key")
+        SettingsRepository(context).saveSearchRadius(300)
+
+        // Previous cached stop: Lipanská
+        val lipanskaCoords = Coordinates(lat = 50.0839, lon = 14.4534)
+        val lipanskaResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "Lipanska", stopName = "Lipanská", platformCode = "A", stopLat = lipanskaCoords.lat, stopLon = lipanskaCoords.lon)
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(scheduled = earlier.plusSeconds(300).toString()),
+                    stop = GolemioDepartureStopDto(id = "Lipanska", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "9", type = 0),
+                    trip = GolemioTripDto(headsign = "Spojovací")
+                )
+            )
+        )
+        repository.saveLocation(lipanskaCoords, observedAt = earlier)
+        repository.saveDepartures(lipanskaResponse, timestamp = earlier)
+        repository.saveActiveSelection(stopIndex = 0, platformCode = "A")
+
+        val lipanskaStop = Stop(
+            id = "Lipanska",
+            name = "Lipanská",
+            lat = lipanskaCoords.lat,
+            lon = lipanskaCoords.lon,
+            platforms = listOf(Platform("Lipanska", "A"))
+        )
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(lipanskaStop),
+                activeStopIndex = 0,
+                activePlatformCode = "A"
+            ),
+            repository = repository
+        )
+
+        // Commuter has moved 11.2 km away
+        val distantLocation = createMockLocation("gps", lat = 50.0520, lon = 14.2950)
+        val fakeDataSource = FakeTransitDataSource()
+        // API returns empty (no stops within 300m)
+        fakeDataSource.defaultResult = Result.success(GolemioDepartureBoardResponse(stops = emptyList(), departures = emptyList()))
+
+        val worker = TestListenableWorkerBuilder<ArrivalsUpdateWorker>(context).build()
+        worker.locationResolver = object : LocationResolver {
+            override suspend fun resolveLocation(highAccuracyTimeoutMs: Long, balancedTimeoutMs: Long): android.location.Location? = distantLocation
+            override suspend fun getLastKnownLocation(): android.location.Location? = distantLocation
+        }
+        worker.departuresRepository = repository
+        worker.transitDataSource = fakeDataSource
+        worker.clock = { now }
+
+        val workerResult = worker.doWork()
+
+        assertEquals(androidx.work.ListenableWorker.Result.success(), workerResult)
+        val state = WidgetStateManager.getState(context, now, repository = repository)
+        assertTrue("State should transition to Empty when no stops within search radius, but was $state", state is ArrivalsViewState.Empty)
+        val emptyState = state as ArrivalsViewState.Empty
+        assertEquals("No transit stops found within 300m", emptyState.message)
+        assertNull("Cached departures must be purged", repository.getCachedDepartures())
+        assertTrue("Active platform selection must be cleared", repository.getActivePlatformCode().isNullOrEmpty())
+    }
+
+    @Test
+    fun worker_whenApiRequestFailsWhileOutOfRange_offlineFallbackDoesNotResurrectDistantCachedStop() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        org.robolectric.Shadows.shadowOf(app).grantPermissions(android.Manifest.permission.ACCESS_FINE_LOCATION)
+
+        val repository = InMemoryDeparturesRepository()
+        val now = Instant.parse("2026-10-23T14:30:00Z")
+        val earlier = now.minusSeconds(30 * 60)
+        SettingsRepository(context).saveApiKey("test-key")
+        SettingsRepository(context).saveSearchRadius(300)
+
+        // Previous cached stop: Lipanská (~11km away)
+        val lipanskaCoords = Coordinates(lat = 50.0839, lon = 14.4534)
+        val lipanskaResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "Lipanska", stopName = "Lipanská", platformCode = "A", stopLat = lipanskaCoords.lat, stopLon = lipanskaCoords.lon)
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(scheduled = earlier.plusSeconds(300).toString()),
+                    stop = GolemioDepartureStopDto(id = "Lipanska", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "9", type = 0),
+                    trip = GolemioTripDto(headsign = "Spojovací")
+                )
+            )
+        )
+        repository.saveLocation(lipanskaCoords, observedAt = earlier)
+        repository.saveDepartures(lipanskaResponse, timestamp = earlier)
+        repository.saveActiveSelection(stopIndex = 0, platformCode = "A")
+
+        val lipanskaStop = Stop(
+            id = "Lipanska",
+            name = "Lipanská",
+            lat = lipanskaCoords.lat,
+            lon = lipanskaCoords.lon,
+            platforms = listOf(Platform("Lipanska", "A"))
+        )
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(lipanskaStop),
+                activeStopIndex = 0,
+                activePlatformCode = "A"
+            ),
+            repository = repository
+        )
+
+        // Commuter is 11.2 km away; network fails
+        val distantLocation = createMockLocation("gps", lat = 50.0520, lon = 14.2950)
+        val fakeDataSource = FakeTransitDataSource()
+        fakeDataSource.defaultResult = Result.failure(java.io.IOException("Network offline"))
+
+        val worker = TestListenableWorkerBuilder<ArrivalsUpdateWorker>(context).build()
+        worker.locationResolver = object : LocationResolver {
+            override suspend fun resolveLocation(highAccuracyTimeoutMs: Long, balancedTimeoutMs: Long): android.location.Location? = distantLocation
+            override suspend fun getLastKnownLocation(): android.location.Location? = distantLocation
+        }
+        worker.departuresRepository = repository
+        worker.transitDataSource = fakeDataSource
+        worker.clock = { now }
+
+        val workerResult = worker.doWork()
+
+        assertEquals(androidx.work.ListenableWorker.Result.success(), workerResult)
+        val state = WidgetStateManager.getState(context, now, repository = repository)
+        assertFalse("Offline fallback must NEVER resurrect an out-of-range cached stop across town", state is ArrivalsViewState.Content)
+        assertNull("Out-of-range cached departures must be purged", repository.getCachedDepartures())
     }
 }

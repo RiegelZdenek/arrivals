@@ -125,6 +125,11 @@ object WidgetStateManager {
                     // Ignore in non-Android test environments if needed
                 }
             }
+        } else if (newState is ArrivalsViewState.Empty) {
+            try {
+                repository.saveActiveSelection(0, "")
+            } catch (e: Exception) {
+            }
         }
     }
 

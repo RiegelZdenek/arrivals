@@ -47,8 +47,14 @@ sealed interface ArrivalsViewState {
     ) : ArrivalsViewState
 
     data class Empty(
-        val message: String = "No transit stops found nearby"
-    ) : ArrivalsViewState
+        val message: String = "No transit stops found nearby",
+        val searchRadiusMeters: Int? = null
+    ) : ArrivalsViewState {
+        companion object {
+            fun forRadius(radiusMeters: Int): Empty =
+                Empty(message = "No transit stops found within ${radiusMeters}m", searchRadiusMeters = radiusMeters)
+        }
+    }
 
     data class Error(
         val message: String,
@@ -163,7 +169,8 @@ sealed interface ArrivalsAction {
         val response: GolemioDepartureBoardResponse,
         val userCoordinates: Coordinates? = null,
         val referenceTime: Instant = Instant.now(),
-        val cachedWarning: String? = null
+        val cachedWarning: String? = null,
+        val searchRadius: Int? = null
     ) : ArrivalsAction
     data class TickCountdown(
         val referenceTime: Instant = Instant.now()

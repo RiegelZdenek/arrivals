@@ -1015,4 +1015,91 @@ class ArrivalsEngineTest {
         assertEquals(2, remaining[0].countdown.minutesRemaining)
         assertEquals("2 min", remaining[0].countdown.displayText)
     }
+
+    @Test
+    fun ingestApiResponse_whenSearchRadiusProvidedAndNoStopsInResponse_transitionsToEmptyWithRadiusMessage() {
+        val previousState = ArrivalsViewState.Content(
+            stops = listOf(
+                Stop("Lipanska", "Lipanská", platforms = listOf(Platform("p1", "A")))
+            ),
+            activeStopIndex = 0,
+            activePlatformCode = "A"
+        )
+
+        val emptyResponse = GolemioDepartureBoardResponse(stops = emptyList(), departures = emptyList())
+        val searchRadiusMeters = 300
+
+        val nextState = engine.reduce(
+            previousState,
+            ArrivalsAction.IngestApiResponse(
+                response = emptyResponse,
+                userCoordinates = Coordinates(50.0520, 14.2950),
+                referenceTime = now,
+                searchRadius = searchRadiusMeters
+            )
+        )
+
+        assertTrue("State must transition to Empty when no stops found within search radius", nextState is ArrivalsViewState.Empty)
+        val empty = nextState as ArrivalsViewState.Empty
+        assertEquals("No transit stops found within 300m", empty.message)
+        assertEquals(300, empty.searchRadiusMeters)
+    }
+
+    @Test
+    fun ingestApiResponse_whenSearchRadiusProvidedAndAllStopsFartherThanSearchRadius_transitionsToEmptyWithRadiusMessage() {
+        val previousState = ArrivalsViewState.Content(
+            stops = listOf(
+                Stop("Lipanska", "Lipanská", platforms = listOf(Platform("p1", "A")))
+            ),
+            activeStopIndex = 0,
+            activePlatformCode = "A"
+        )
+
+        // User at (50.0520, 14.2950). Response has Lipanská at (50.0839, 14.4534), ~11km away.
+        val responseWithDistantStop = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "Lipanska", stopName = "Lipanská", platformCode = "A", stopLat = 50.0839, stopLon = 14.4534)
+            )
+        )
+        val searchRadiusMeters = 300
+
+        val nextState = engine.reduce(
+            previousState,
+            ArrivalsAction.IngestApiResponse(
+                response = responseWithDistantStop,
+                userCoordinates = Coordinates(50.0520, 14.2950),
+                referenceTime = now,
+                searchRadius = searchRadiusMeters
+            )
+        )
+
+        assertTrue("State must transition to Empty when all stops exceed search radius", nextState is ArrivalsViewState.Empty)
+        val empty = nextState as ArrivalsViewState.Empty
+        assertEquals("No transit stops found within 300m", empty.message)
+    }
+
+    @Test
+    fun ingestApiResponse_whenSearchRadiusProvidedAndStopsFoundWithinRadius_transitionsToContent() {
+        val userAtLipanska = Coordinates(50.0839, 14.4534)
+        val responseWithNearbyStop = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "Lipanska", stopName = "Lipanská", platformCode = "A", stopLat = 50.0839, stopLon = 14.4534)
+            )
+        )
+        val searchRadiusMeters = 300
+
+        val nextState = engine.reduce(
+            ArrivalsViewState.Loading(),
+            ArrivalsAction.IngestApiResponse(
+                response = responseWithNearbyStop,
+                userCoordinates = userAtLipanska,
+                referenceTime = now,
+                searchRadius = searchRadiusMeters
+            )
+        )
+
+        assertTrue("State must transition to Content when stop is within search radius", nextState is ArrivalsViewState.Content)
+        val content = nextState as ArrivalsViewState.Content
+        assertEquals("Lipanská", content.activeStop.name)
+    }
 }

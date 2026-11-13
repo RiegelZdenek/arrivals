@@ -166,8 +166,14 @@ class ArrivalsUpdateWorker(
                 WidgetStateManager.updateAllWidgets(appContext)
             }
 
+            val freshLocation = getFreshLocation(appContext, settingsRepository, locationResolver)
+            val preferredRadius = settingsRepository.getSearchRadius()
+            if (freshLocation != null) {
+                departuresRepository.purgeIfOutOfRange(freshLocation, preferredRadius)
+            }
+
             val locationResolution = departuresRepository.resolveLocation(
-                freshCoordinates = getFreshLocation(appContext, settingsRepository, locationResolver),
+                freshCoordinates = freshLocation,
                 currentTime = currentTime
             )
 
@@ -218,7 +224,6 @@ class ArrivalsUpdateWorker(
 
             val userCoords = locationResolution.coordinates
             val dataSource = transitDataSource ?: defaultTransitDataSourceProvider?.invoke(appContext, apiKey) ?: TransitDataSource.create(appContext) { apiKey }
-            val preferredRadius = settingsRepository.getSearchRadius()
             val fetchResult = fetchWithAdaptiveRadius(
                 transitDataSource = dataSource,
                 userCoordinates = userCoords,
@@ -230,7 +235,11 @@ class ArrivalsUpdateWorker(
             if (fetchResult.isSuccess) {
                 lastSuccessfulUpdateMillis = nowMillis
                 val apiSuccessResponse = fetchResult.getOrThrow()
-                departuresRepository.saveDepartures(apiSuccessResponse, currentTime)
+                if (apiSuccessResponse.stops.isEmpty() && apiSuccessResponse.departures.isEmpty()) {
+                    departuresRepository.purgeCache()
+                } else {
+                    departuresRepository.saveDepartures(apiSuccessResponse, currentTime)
+                }
 
                 val warningBanner = (locationResolution as? LocationResolution.UndergroundFallback)?.warningBanner
 
@@ -240,7 +249,8 @@ class ArrivalsUpdateWorker(
                         response = apiSuccessResponse,
                         userCoordinates = userCoords,
                         referenceTime = currentTime,
-                        cachedWarning = warningBanner
+                        cachedWarning = warningBanner,
+                        searchRadius = preferredRadius
                     )
                 )
 
@@ -254,7 +264,8 @@ class ArrivalsUpdateWorker(
                 now = currentTime,
                 userCoords = userCoords,
                 fallbackErrorMessage = fetchResult.exceptionOrNull()?.message,
-                repository = departuresRepository
+                repository = departuresRepository,
+                searchRadius = preferredRadius
             )
             return false
         }
@@ -352,9 +363,13 @@ class ArrivalsUpdateWorker(
             now: Instant = Instant.now(),
             userCoords: Coordinates? = null,
             fallbackErrorMessage: String? = null,
-            repository: DeparturesRepository = DeparturesRepository.create(context)
+            repository: DeparturesRepository = DeparturesRepository.create(context),
+            searchRadius: Int = 300
         ) {
             val engine = ArrivalsEngine()
+            if (userCoords != null) {
+                repository.purgeIfOutOfRange(userCoords, searchRadius)
+            }
             val cached = repository.getCachedDepartures()
             val current = WidgetStateManager.getState(context, now, repository)
             val targetStop = (current as? ArrivalsViewState.Content)?.activeStop
@@ -366,7 +381,8 @@ class ArrivalsUpdateWorker(
                         response = cached.response,
                         userCoordinates = userCoords ?: cached.coordinates,
                         referenceTime = now,
-                        cachedWarning = cached.warningBanner
+                        cachedWarning = cached.warningBanner,
+                        searchRadius = searchRadius
                     )
                 )
                 if (updatedState is ArrivalsViewState.Content) {
@@ -389,13 +405,21 @@ class ArrivalsUpdateWorker(
                 }
             }
 
-            val stopName = targetStop?.name
-            val msg = if (stopName != null) {
-                "Unable to fetch departures for $stopName. Check connection."
+            val isTargetStopOutOfRange = userCoords != null && targetStop != null &&
+                Coordinates(targetStop.lat, targetStop.lon).distanceTo(userCoords) > searchRadius
+
+            val fallbackState: ArrivalsViewState = if (isTargetStopOutOfRange) {
+                ArrivalsViewState.Empty.forRadius(searchRadius)
             } else {
-                fallbackErrorMessage ?: "Unable to fetch transit departures"
+                val stopName = targetStop?.name
+                val msg = if (stopName != null) {
+                    "Unable to fetch departures for $stopName. Check connection."
+                } else {
+                    fallbackErrorMessage ?: "Unable to fetch transit departures"
+                }
+                ArrivalsViewState.Error(msg, canRetry = true)
             }
-            WidgetStateManager.setState(context, ArrivalsViewState.Error(msg, canRetry = true), repository)
+            WidgetStateManager.setState(context, fallbackState, repository)
             WidgetStateManager.updateAllWidgets(context)
         }
 
