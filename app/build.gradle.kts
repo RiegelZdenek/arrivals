@@ -7,6 +7,14 @@ plugins {
 val appVersionCode: Provider<String> = providers.gradleProperty("appVersionCode")
 val appVersionName: Provider<String> = providers.gradleProperty("appVersionName")
 
+fun computeVersionCode(name: String?): Int {
+    if (name == null) return 1
+    val regex = Regex("""^v?(\d+)\.(\d+)\.(\d+)""")
+    val match = regex.find(name) ?: return 1
+    val (major, minor, patch) = match.destructured
+    return major.toInt() * 10000 + minor.toInt() * 100 + patch.toInt()
+}
+
 android {
     namespace = "cz.riegel.arrivals"
     compileSdk = 35
@@ -15,16 +23,30 @@ android {
         applicationId = "cz.riegel.arrivals"
         minSdk = 26
         targetSdk = 35
-        versionCode = appVersionCode.map { it.toInt() }.getOrElse(1)
+        versionCode = appVersionCode.map { it.toInt() }.getOrElse(computeVersionCode(appVersionName.orNull))
         versionName = appVersionName.getOrElse("0.1.0-beta")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        create("release") {
+            val keystorePath = System.getenv("RELEASE_KEYSTORE_PATH")
+            if (!keystorePath.isNullOrBlank() && file(keystorePath).exists()) {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD") ?: ""
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS") ?: ""
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD") ?: ""
+            } else {
+                initWith(getByName("debug"))
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
