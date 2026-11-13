@@ -37,6 +37,10 @@ _Avoid_: Vehicle Type, Category
 The geographic coordinates (latitude and longitude) of the user acquired via device location services, used to calculate proximity to nearby Stops and Platforms.
 _Avoid_: GPS Lock, Position, User Location
 
+**Search Radius**:
+The maximum walking distance in meters (configurable by the user, default 300m) used to detect nearby Stops around the current Location Fix.
+_Avoid_: Range, Proximity Limit, Distance Filter
+
 **Cached Departures**:
-Previously retrieved Departure records retained on-device to ensure uninterrupted Departure Board display when network connectivity or fresh Location Fixes are temporarily unavailable.
+Previously retrieved Departure records retained on-device to ensure uninterrupted Departure Board display when network connectivity or fresh Location Fixes are temporarily unavailable. Cached Departures are invalidated when a fresh Location Fix indicates the user has moved beyond the Search Radius of the cached Stop.
 _Avoid_: Stale Data, Offline Cache, Snapshot
