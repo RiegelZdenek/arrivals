@@ -17,6 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 object WidgetCountdownTicker {
     const val ACTION_TICK_COUNTDOWN = "cz.riegel.arrivals.action.TICK_COUNTDOWN"
     const val SCREEN_ON_THROTTLE_MS = 180_000L // 3 minutes
+    const val USER_PRESENT_DEBOUNCE_MS = 500L
     private const val ALARM_REQUEST_CODE = 4201
 
     private val isRegistered = AtomicBoolean(false)
@@ -24,9 +25,38 @@ object WidgetCountdownTicker {
 
     internal var clock: () -> Long = { System.currentTimeMillis() }
     internal var lastScreenOnUpdateMillis: Long = 0L
+    internal var lastUserPresentUpdateMillis: Long = 0L
+    internal var activeUserPresentJob: Job? = null
     internal var lastJob: Job? = null
 
+    fun triggerUserPresent(context: Context): Job = synchronized(this) {
+        val existing = activeUserPresentJob
+        if (existing != null && existing.isActive) {
+            lastJob = existing
+            return existing
+        }
+        val job = scope.launch {
+            try {
+                handleUserPresent(context)
+            } finally {
+                synchronized(this@WidgetCountdownTicker) {
+                    if (activeUserPresentJob === coroutineContext[Job]) {
+                        activeUserPresentJob = null
+                    }
+                }
+            }
+        }
+        activeUserPresentJob = job
+        lastJob = job
+        return job
+    }
+
     suspend fun handleUserPresent(context: Context) {
+        val now = clock()
+        if (lastUserPresentUpdateMillis != 0L && (now - lastUserPresentUpdateMillis) < USER_PRESENT_DEBOUNCE_MS) {
+            return
+        }
+        lastUserPresentUpdateMillis = now
         WidgetStateManager.tickCountdowns(context)
         scheduleNextMinuteAlarm(context)
         ArrivalsUpdateWorker.enqueueExpeditedOneTimeWork(context)
@@ -52,9 +82,7 @@ object WidgetCountdownTicker {
             val appCtx = context.applicationContext
             when (intent?.action) {
                 Intent.ACTION_USER_PRESENT -> {
-                    lastJob = scope.launch {
-                        handleUserPresent(appCtx)
-                    }
+                    triggerUserPresent(appCtx)
                 }
                 Intent.ACTION_SCREEN_ON -> {
                     lastJob = scope.launch {
@@ -82,7 +110,7 @@ object WidgetCountdownTicker {
                     addAction(Intent.ACTION_USER_PRESENT)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    appCtx.registerReceiver(timeTickReceiver, filter, Context.RECEIVER_EXPORTED)
+                    appCtx.registerReceiver(timeTickReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
                 } else {
                     appCtx.registerReceiver(timeTickReceiver, filter)
                 }
@@ -111,6 +139,8 @@ object WidgetCountdownTicker {
         }
         isRegistered.set(false)
         lastScreenOnUpdateMillis = 0L
+        lastUserPresentUpdateMillis = 0L
+        activeUserPresentJob = null
         clock = { System.currentTimeMillis() }
         lastJob = null
     }

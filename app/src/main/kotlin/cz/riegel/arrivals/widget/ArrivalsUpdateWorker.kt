@@ -171,7 +171,7 @@ class ArrivalsUpdateWorker(
             val freshLocation = getFreshLocation(appContext, settingsRepository, locationResolver)
             val preferredRadius = settingsRepository.getSearchRadius()
             if (freshLocation != null) {
-                departuresRepository.purgeIfOutOfRange(freshLocation, preferredRadius)
+                departuresRepository.purgeIfBeyondSearchRadius(freshLocation, preferredRadius)
             }
 
             val lastCoords = departuresRepository.getLastCoordinates()
@@ -201,37 +201,19 @@ class ArrivalsUpdateWorker(
                     }
 
                     val dataSource = transitDataSource ?: defaultTransitDataSourceProvider?.invoke(appContext, apiKey) ?: TransitDataSource.create(appContext) { apiKey }
-                    val fetchResult = dataSource.fetchDeparturesForStops(listOf(activeStop.name))
-                    if (fetchResult.isSuccess) {
-                        val apiSuccessResponse = fetchResult.getOrThrow()
-                        if (apiSuccessResponse.departures.isNotEmpty() || apiSuccessResponse.stops.isNotEmpty()) {
-                            departuresRepository.saveDepartures(apiSuccessResponse, currentTime)
-                            val finalState = engine.reduce(
-                                baseState,
-                                ArrivalsAction.IngestApiResponse(
-                                    response = apiSuccessResponse,
-                                    userCoordinates = freshLocation,
-                                    referenceTime = currentTime,
-                                    cachedWarning = null,
-                                    searchRadius = preferredRadius
-                                )
-                            )
-                            WidgetStateManager.setState(appContext, finalState, departuresRepository)
-                            WidgetStateManager.updateAllWidgets(appContext)
-                            lastSuccessfulUpdateMillis = nowMillis
-                            return true
-                        }
-                    }
-
-                    restoreCachedDepartures(
-                        context = appContext,
-                        now = currentTime,
+                    return executeActiveStopQuery(
+                        appContext = appContext,
+                        baseState = baseState,
+                        activeStop = activeStop,
+                        currentTime = currentTime,
                         userCoords = freshLocation,
-                        fallbackErrorMessage = fetchResult.exceptionOrNull()?.message,
-                        repository = departuresRepository,
-                        searchRadius = preferredRadius
+                        warningBanner = null,
+                        searchRadius = preferredRadius,
+                        departuresRepository = departuresRepository,
+                        dataSource = dataSource,
+                        engine = engine,
+                        nowMillis = nowMillis
                     )
-                    return false
                 }
             }
 
@@ -248,37 +230,19 @@ class ArrivalsUpdateWorker(
 
                 if (activeStop != null) {
                     val dataSource = transitDataSource ?: defaultTransitDataSourceProvider?.invoke(appContext, apiKey) ?: TransitDataSource.create(appContext) { apiKey }
-                    val fetchResult = dataSource.fetchDeparturesForStops(listOf(activeStop.name))
-                    if (fetchResult.isSuccess) {
-                        val apiSuccessResponse = fetchResult.getOrThrow()
-                        if (apiSuccessResponse.departures.isNotEmpty() || apiSuccessResponse.stops.isNotEmpty()) {
-                            departuresRepository.saveDepartures(apiSuccessResponse, currentTime)
-                            val warningBanner = "GPS unavailable • Showing ${activeStop.name}"
-                            val finalState = engine.reduce(
-                                baseState,
-                                ArrivalsAction.IngestApiResponse(
-                                    response = apiSuccessResponse,
-                                    userCoordinates = null,
-                                    referenceTime = currentTime,
-                                    cachedWarning = warningBanner
-                                )
-                            )
-                            WidgetStateManager.setState(appContext, finalState, departuresRepository)
-                            WidgetStateManager.updateAllWidgets(appContext)
-                            lastSuccessfulUpdateMillis = nowMillis
-                            return true
-                        }
-                    }
-
-                    // If active stop query fails or returns empty, fall back to restoreCachedDepartures
-                    restoreCachedDepartures(
-                        context = appContext,
-                        now = currentTime,
+                    return executeActiveStopQuery(
+                        appContext = appContext,
+                        baseState = baseState,
+                        activeStop = activeStop,
+                        currentTime = currentTime,
                         userCoords = null,
-                        fallbackErrorMessage = fetchResult.exceptionOrNull()?.message,
-                        repository = departuresRepository
+                        warningBanner = "GPS unavailable • Showing ${activeStop.name}",
+                        searchRadius = preferredRadius,
+                        departuresRepository = departuresRepository,
+                        dataSource = dataSource,
+                        engine = engine,
+                        nowMillis = nowMillis
                     )
-                    return false
                 }
 
                 handleNoValidLocation(appContext, currentTime, departuresRepository)
@@ -287,11 +251,9 @@ class ArrivalsUpdateWorker(
 
             val userCoords = locationResolution.coordinates
             val dataSource = transitDataSource ?: defaultTransitDataSourceProvider?.invoke(appContext, apiKey) ?: TransitDataSource.create(appContext) { apiKey }
-            val fetchResult = fetchWithAdaptiveRadius(
-                transitDataSource = dataSource,
-                userCoordinates = userCoords,
-                preferredRadius = preferredRadius,
-                adaptiveRadii = engine.adaptiveSearchRadii,
+            val fetchResult = dataSource.fetchNearbyDepartures(
+                coordinates = userCoords,
+                radiusMeters = preferredRadius,
                 limit = 60
             )
 
@@ -421,6 +383,49 @@ class ArrivalsUpdateWorker(
             }
         }
 
+        private suspend fun executeActiveStopQuery(
+            appContext: Context,
+            baseState: ArrivalsViewState.Content,
+            activeStop: cz.riegel.arrivals.domain.model.Stop,
+            currentTime: Instant,
+            userCoords: Coordinates?,
+            warningBanner: String?,
+            searchRadius: Int,
+            departuresRepository: DeparturesRepository,
+            dataSource: TransitDataSource,
+            engine: ArrivalsEngine,
+            nowMillis: Long
+        ): Boolean {
+            val fetchResult = dataSource.fetchDeparturesForStops(listOf(activeStop.name))
+            if (fetchResult.isSuccess) {
+                val apiSuccessResponse = fetchResult.getOrThrow()
+                if (apiSuccessResponse.departures.isNotEmpty() || apiSuccessResponse.stops.isNotEmpty()) {
+                    departuresRepository.saveDepartures(apiSuccessResponse, currentTime)
+                    val finalState = engine.updateActiveStopDepartures(
+                        currentState = baseState,
+                        response = apiSuccessResponse,
+                        referenceTime = currentTime,
+                        userCoordinates = userCoords,
+                        warningBanner = warningBanner
+                    )
+                    WidgetStateManager.setState(appContext, finalState, departuresRepository)
+                    WidgetStateManager.updateAllWidgets(appContext)
+                    lastSuccessfulUpdateMillis = nowMillis
+                    return true
+                }
+            }
+
+            restoreCachedDepartures(
+                context = appContext,
+                now = currentTime,
+                userCoords = userCoords,
+                fallbackErrorMessage = fetchResult.exceptionOrNull()?.message,
+                repository = departuresRepository,
+                searchRadius = searchRadius
+            )
+            return false
+        }
+
         suspend fun restoreCachedDepartures(
             context: Context,
             now: Instant = Instant.now(),
@@ -431,7 +436,7 @@ class ArrivalsUpdateWorker(
         ) {
             val engine = ArrivalsEngine()
             if (userCoords != null) {
-                repository.purgeIfOutOfRange(userCoords, searchRadius)
+                repository.purgeIfBeyondSearchRadius(userCoords, searchRadius)
             }
             val cached = repository.getCachedDepartures()
             val current = WidgetStateManager.getState(context, now, repository)
@@ -468,10 +473,10 @@ class ArrivalsUpdateWorker(
                 }
             }
 
-            val isTargetStopOutOfRange = userCoords != null && targetStop != null &&
+            val isTargetStopBeyondSearchRadius = userCoords != null && targetStop != null &&
                 Coordinates(targetStop.lat, targetStop.lon).distanceTo(userCoords) > searchRadius
 
-            val fallbackState: ArrivalsViewState = if (isTargetStopOutOfRange) {
+            val fallbackState: ArrivalsViewState = if (isTargetStopBeyondSearchRadius) {
                 ArrivalsViewState.Empty.forRadius(searchRadius)
             } else {
                 val stopName = targetStop?.name

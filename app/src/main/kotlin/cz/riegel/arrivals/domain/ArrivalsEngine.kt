@@ -126,13 +126,13 @@ class ArrivalsEngine(
                     rawStops
                 }
 
-                val inRangeStops = if (action.searchRadius != null && action.userCoordinates != null) {
+                val stopsWithinSearchRadius = if (action.searchRadius != null && action.userCoordinates != null) {
                     rankedStops.filter { (it.distanceMeters ?: Int.MAX_VALUE) <= action.searchRadius }
                 } else {
                     rankedStops
                 }
 
-                if (inRangeStops.isEmpty()) {
+                if (stopsWithinSearchRadius.isEmpty()) {
                     return if (action.searchRadius != null) {
                         ArrivalsViewState.Empty.forRadius(action.searchRadius)
                     } else {
@@ -153,15 +153,15 @@ class ArrivalsEngine(
 
                     if (shouldSnapToClosest) {
                         resolvedStopIndex = 0
-                        resolvedStop = inRangeStops.first()
+                        resolvedStop = stopsWithinSearchRadius.first()
                         resolvedPlatformCode = resolveDefaultPlatformCode(resolvedStop, action.userCoordinates)
                     } else {
                         val previousStop = state.activeStop
-                        val matchedStopIndex = inRangeStops.indexOfFirst {
+                        val matchedStopIndex = stopsWithinSearchRadius.indexOfFirst {
                             it.id == previousStop.id || it.name == previousStop.name
                         }
                         resolvedStopIndex = if (matchedStopIndex >= 0) matchedStopIndex else 0
-                        resolvedStop = inRangeStops[resolvedStopIndex]
+                        resolvedStop = stopsWithinSearchRadius[resolvedStopIndex]
                         resolvedPlatformCode = if (
                             matchedStopIndex >= 0 &&
                             resolvedStop.platforms.any { it.code == state.activePlatformCode }
@@ -174,7 +174,7 @@ class ArrivalsEngine(
 
                     val resolvedPickerMode = when (state.pickerMode) {
                         PickerMode.StopPicker -> {
-                            if (inRangeStops.size > 1) PickerMode.StopPicker else PickerMode.Departures
+                            if (stopsWithinSearchRadius.size > 1) PickerMode.StopPicker else PickerMode.Departures
                         }
                         PickerMode.PlatformPicker -> {
                             if (resolvedStop.platforms.size > 1) PickerMode.PlatformPicker else PickerMode.Departures
@@ -182,7 +182,7 @@ class ArrivalsEngine(
                         PickerMode.Departures -> PickerMode.Departures
                     }
                     return ArrivalsViewState.Content(
-                        stops = inRangeStops,
+                        stops = stopsWithinSearchRadius,
                         activeStopIndex = resolvedStopIndex,
                         activePlatformCode = resolvedPlatformCode,
                         userCoordinates = action.userCoordinates,
@@ -193,15 +193,25 @@ class ArrivalsEngine(
                     )
                 }
 
-                val primaryStop = inRangeStops.first()
+                val primaryStop = stopsWithinSearchRadius.first()
                 ArrivalsViewState.Content(
-                    stops = inRangeStops,
+                    stops = stopsWithinSearchRadius,
                     activeStopIndex = 0,
                     activePlatformCode = resolveDefaultPlatformCode(primaryStop, action.userCoordinates),
                     userCoordinates = action.userCoordinates,
                     cachedWarning = action.cachedWarning,
                     isRefreshing = false,
                     isLoadingDepartures = false
+                )
+            }
+            is ArrivalsAction.UpdateActiveStopDepartures -> {
+                if (state !is ArrivalsViewState.Content) return state
+                updateActiveStopDepartures(
+                    currentState = state,
+                    response = action.response,
+                    referenceTime = action.referenceTime,
+                    userCoordinates = action.userCoordinates,
+                    warningBanner = action.warningBanner
                 )
             }
             is ArrivalsAction.TickCountdown -> {
@@ -421,4 +431,80 @@ class ArrivalsEngine(
         from: Coordinates,
         to: Coordinates
     ): Int = from.distanceTo(to)
+
+    fun updateActiveStopDepartures(
+        currentState: ArrivalsViewState.Content,
+        response: GolemioDepartureBoardResponse,
+        referenceTime: Instant,
+        userCoordinates: Coordinates? = currentState.userCoordinates,
+        warningBanner: String? = null
+    ): ArrivalsViewState.Content {
+        val activeStop = currentState.activeStop
+        val normalizedStops = normalize(response, referenceTime)
+        val refreshedStop = normalizedStops.find { it.id == activeStop.id || it.name == activeStop.name }
+            ?: normalizedStops.firstOrNull()
+
+        val updatedStop = if (refreshedStop != null) {
+            val lat = if (refreshedStop.lat != 0.0) refreshedStop.lat else activeStop.lat
+            val lon = if (refreshedStop.lon != 0.0) refreshedStop.lon else activeStop.lon
+            val dist = if (userCoordinates != null && lat != 0.0 && lon != 0.0) {
+                calculateDistanceMeters(userCoordinates, Coordinates(lat, lon))
+            } else {
+                activeStop.distanceMeters
+            }
+
+            val existingPlatformsByCode = activeStop.platforms.associateBy { it.code }
+            val refreshedPlatformCodes = refreshedStop.platforms.map { it.code }.toSet()
+
+            val mergedPlatforms = refreshedStop.platforms.map { refPlatform ->
+                val existing = existingPlatformsByCode[refPlatform.code]
+                val pLat = if (refPlatform.lat != 0.0) refPlatform.lat else (existing?.lat ?: 0.0)
+                val pLon = if (refPlatform.lon != 0.0) refPlatform.lon else (existing?.lon ?: 0.0)
+                val pDist = if (userCoordinates != null && pLat != 0.0 && pLon != 0.0) {
+                    calculateDistanceMeters(userCoordinates, Coordinates(pLat, pLon))
+                } else {
+                    existing?.distanceMeters ?: dist
+                }
+                refPlatform.copy(
+                    id = if (refPlatform.id.isNotEmpty()) refPlatform.id else (existing?.id ?: refPlatform.code),
+                    lat = pLat,
+                    lon = pLon,
+                    distanceMeters = pDist
+                )
+            } + activeStop.platforms.filter { it.code !in refreshedPlatformCodes }.map { unmentioned ->
+                unmentioned.copy(departures = emptyList())
+            }
+
+            activeStop.copy(
+                lat = lat,
+                lon = lon,
+                distanceMeters = dist,
+                platforms = mergedPlatforms.sortedBy { it.code }
+            )
+        } else {
+            activeStop.copy(
+                platforms = activeStop.platforms.map { it.copy(departures = emptyList()) }
+            )
+        }
+
+        val updatedStops = currentState.stops.toMutableList()
+        if (currentState.activeStopIndex in updatedStops.indices) {
+            updatedStops[currentState.activeStopIndex] = updatedStop
+        }
+
+        val resolvedPlatformCode = if (updatedStop.platforms.any { it.code == currentState.activePlatformCode }) {
+            currentState.activePlatformCode
+        } else {
+            resolveDefaultPlatformCode(updatedStop, userCoordinates)
+        }
+
+        return currentState.copy(
+            stops = updatedStops,
+            activePlatformCode = resolvedPlatformCode,
+            userCoordinates = userCoordinates ?: currentState.userCoordinates,
+            cachedWarning = warningBanner,
+            isRefreshing = false,
+            isLoadingDepartures = false
+        )
+    }
 }

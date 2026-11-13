@@ -39,9 +39,8 @@ interface DeparturesRepository {
     fun getLastFetchTime(): Instant?
 
     fun purgeCache()
-    fun clearCache() = purgeCache()
 
-    fun isCacheOutOfRange(freshCoordinates: Coordinates, searchRadiusMeters: Int): Boolean {
+    fun isCacheBeyondSearchRadius(freshCoordinates: Coordinates, searchRadiusMeters: Int): Boolean {
         val cached = getCachedDepartures() ?: return false
         val validStopCoords = cached.response.stops
             .filter { it.stopLat != 0.0 && it.stopLon != 0.0 }
@@ -60,8 +59,8 @@ interface DeparturesRepository {
         }
     }
 
-    fun purgeIfOutOfRange(freshCoordinates: Coordinates, searchRadiusMeters: Int): Boolean {
-        if (isCacheOutOfRange(freshCoordinates, searchRadiusMeters)) {
+    fun purgeIfBeyondSearchRadius(freshCoordinates: Coordinates, searchRadiusMeters: Int): Boolean {
+        if (isCacheBeyondSearchRadius(freshCoordinates, searchRadiusMeters)) {
             purgeCache()
             return true
         }
@@ -71,6 +70,7 @@ interface DeparturesRepository {
     fun saveActiveSelection(stopIndex: Int, platformCode: String)
     fun getActiveStopIndex(): Int
     fun getActivePlatformCode(): String?
+    fun clearActiveSelection()
 
     companion object {
         const val UNDERGROUND_WARNING_BANNER = "Underground GPS fallback • Last known location"
@@ -218,6 +218,13 @@ class SharedPreferencesDeparturesRepository(
 
     override fun getActivePlatformCode(): String? = prefs.getString(KEY_ACTIVE_PLATFORM_CODE, null)
 
+    override fun clearActiveSelection() {
+        prefs.edit()
+            .remove(KEY_ACTIVE_STOP_INDEX)
+            .remove(KEY_ACTIVE_PLATFORM_CODE)
+            .apply()
+    }
+
     companion object {
         internal const val PREFS_CACHE_NAME = "arrivals_cache_prefs"
         private const val KEY_CACHED_PAYLOAD = "cached_payload"
@@ -287,4 +294,9 @@ class InMemoryDeparturesRepository(
     override fun getActiveStopIndex(): Int = activeStopIndex
 
     override fun getActivePlatformCode(): String? = activePlatformCode
+
+    override fun clearActiveSelection() {
+        activeStopIndex = 0
+        activePlatformCode = null
+    }
 }

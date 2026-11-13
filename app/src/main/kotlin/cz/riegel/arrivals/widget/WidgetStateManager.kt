@@ -127,7 +127,7 @@ object WidgetStateManager {
             }
         } else if (newState is ArrivalsViewState.Empty) {
             try {
-                repository.saveActiveSelection(0, "")
+                repository.clearActiveSelection()
             } catch (e: Exception) {
             }
         }

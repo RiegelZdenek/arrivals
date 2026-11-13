@@ -172,6 +172,12 @@ sealed interface ArrivalsAction {
         val cachedWarning: String? = null,
         val searchRadius: Int? = null
     ) : ArrivalsAction
+    data class UpdateActiveStopDepartures(
+        val response: GolemioDepartureBoardResponse,
+        val referenceTime: Instant = Instant.now(),
+        val userCoordinates: Coordinates? = null,
+        val warningBanner: String? = null
+    ) : ArrivalsAction
     data class TickCountdown(
         val referenceTime: Instant = Instant.now()
     ) : ArrivalsAction

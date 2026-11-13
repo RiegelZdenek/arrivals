@@ -187,7 +187,21 @@ class LocationAndCacheResilienceTest {
     }
 
     @Test
-    fun purgeIfOutOfRange_whenFreshLocationBeyondSearchRadius_evictsCacheAndReturnsTrue() {
+    fun clearActiveSelection_resetsStopIndexAndPlatformCodeAcrossAdapters() {
+        for (repository in adaptersUnderTest()) {
+            repository.saveActiveSelection(stopIndex = 3, platformCode = "C")
+            assertEquals(3, repository.getActiveStopIndex())
+            assertEquals("C", repository.getActivePlatformCode())
+
+            repository.clearActiveSelection()
+
+            assertEquals(0, repository.getActiveStopIndex())
+            assertNull(repository.getActivePlatformCode())
+        }
+    }
+
+    @Test
+    fun purgeIfBeyondSearchRadius_whenFreshLocationBeyondSearchRadius_evictsCacheAndReturnsTrue() {
         val now = Instant.parse("2026-10-23T14:30:00Z")
         val lipanskaCoords = Coordinates(lat = 50.0839, lon = 14.4534)
         val response = GolemioDepartureBoardResponse(
@@ -211,7 +225,7 @@ class LocationAndCacheResilienceTest {
             repository.saveDepartures(response, timestamp = now)
             repository.saveActiveSelection(stopIndex = 0, platformCode = "A")
 
-            val evicted = repository.purgeIfOutOfRange(
+            val evicted = repository.purgeIfBeyondSearchRadius(
                 freshCoordinates = distantCoords,
                 searchRadiusMeters = searchRadiusMeters
             )
@@ -223,7 +237,7 @@ class LocationAndCacheResilienceTest {
     }
 
     @Test
-    fun purgeIfOutOfRange_whenFreshLocationWithinSearchRadius_retainsCacheAndReturnsFalse() {
+    fun purgeIfBeyondSearchRadius_whenFreshLocationWithinSearchRadius_retainsCacheAndReturnsFalse() {
         val now = Instant.parse("2026-10-23T14:30:00Z")
         val lipanskaCoords = Coordinates(lat = 50.0839, lon = 14.4534)
         val response = GolemioDepartureBoardResponse(
@@ -246,7 +260,7 @@ class LocationAndCacheResilienceTest {
             repository.saveLocation(lipanskaCoords, observedAt = now)
             repository.saveDepartures(response, timestamp = now)
 
-            val evicted = repository.purgeIfOutOfRange(
+            val evicted = repository.purgeIfBeyondSearchRadius(
                 freshCoordinates = nearbyCoords,
                 searchRadiusMeters = searchRadiusMeters
             )
