@@ -59,6 +59,10 @@ BREAKING_CHANGE_BODY_REGEX = re.compile(
     r"(?:^|\n)\s*BREAKING[- ]CHANGE:\s*(.+)", re.IGNORECASE
 )
 
+TAG_WEIGHT_SEMVER = 2
+TAG_WEIGHT_BETA = 1
+TAG_WEIGHT_OTHER = 0
+
 
 def filter_stable_tags(tags: List[str]) -> List[str]:
     """Filter out ephemeral nightly tags and sort stable tags descending."""
@@ -74,10 +78,10 @@ def filter_stable_tags(tags: List[str]) -> List[str]:
         clean = tag_name.lstrip("v")
         m = re.match(r"^(\d+)\.(\d+)\.(\d+)", clean)
         if m:
-            return (1, int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            return (TAG_WEIGHT_SEMVER, int(m.group(1)), int(m.group(2)), int(m.group(3)))
         if "beta" in tag_name:
-            return (0, 0, 1, 0)
-        return (-1, 0, 0, 0)
+            return (TAG_WEIGHT_BETA, 0, 1, 0)
+        return (TAG_WEIGHT_OTHER, 0, 0, 0)
 
     stable_candidates.sort(key=sort_key, reverse=True)
     return stable_candidates
