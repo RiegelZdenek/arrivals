@@ -26,8 +26,10 @@ jobs:
 
       - name: Determine if build is needed
         id: check
+        env:
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             echo "Workflow dispatched manually. Forcing build."
             echo "should_build=true" >> "$GITHUB_OUTPUT"
             exit 0
@@ -35,25 +37,25 @@ jobs:
 
           LATEST_TAG=$(git tag -l "nightly-*" --sort=-v:refname | head -n 1)
 
-          if [ -z "$LATEST_TAG" ]; then
-            echo "No previous nightly tags found. Building release."
-            echo "should_build=true" >> "$GITHUB_OUTPUT"
-          else
+          if [ -n "$LATEST_TAG" ]; then
             echo "Latest nightly tag: $LATEST_TAG"
             if COMMITS_COUNT=$(git rev-list "${LATEST_TAG}..HEAD" --count 2>/dev/null); then
               echo "Commits since $LATEST_TAG: $COMMITS_COUNT"
-              if [ "$COMMITS_COUNT" -gt 0 ]; then
-                echo "New commits detected. Building release."
-                echo "should_build=true" >> "$GITHUB_OUTPUT"
-              else
+              if [ "$COMMITS_COUNT" -eq 0 ]; then
                 echo "No new commits since $LATEST_TAG. Skipping build."
                 echo "should_build=false" >> "$GITHUB_OUTPUT"
+                exit 0
               fi
+              echo "New commits detected ($COMMITS_COUNT)."
             else
-              echo "Failed to calculate commit diff between $LATEST_TAG and HEAD. Building release as fallback."
-              echo "should_build=true" >> "$GITHUB_OUTPUT"
+              echo "Failed to calculate commit diff between $LATEST_TAG and HEAD. Falling back to build."
             fi
+          else
+            echo "No previous nightly tags found."
           fi
+
+          echo "Building release."
+          echo "should_build=true" >> "$GITHUB_OUTPUT"
 
   nightly:
     name: Build & Publish Nightly Release
