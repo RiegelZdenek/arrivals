@@ -452,4 +452,60 @@ class ArrivalsWidgetContentTest {
             assertEquals(row.code.hashCode().toLong(), row.code.hashCode().toLong())
         }
     }
+
+    @Test
+    fun distanceBadge_formatsUnderOneThousandMetersAsMeters() {
+        assertEquals("0m", formatDistance(0))
+        assertEquals("15m", formatDistance(15))
+        assertEquals("850m", formatDistance(850))
+        assertEquals("999m", formatDistance(999))
+    }
+
+    @Test
+    fun distanceBadge_formatsOneThousandMetersOrGreaterAsKilometersWithOneDecimal() {
+        assertEquals("1.0 km", formatDistance(1000))
+        assertEquals("1.3 km", formatDistance(1250))
+        assertEquals("11.2 km", formatDistance(11238))
+    }
+
+    @Test
+    fun distanceBadge_consistentAcrossHeaderStopPickerAndPlatformPicker() {
+        val platformNear = Platform(id = "p1", code = "A", distanceMeters = 850)
+        val platformFar = Platform(id = "p2", code = "B", distanceMeters = 11238)
+        val stopNear = Stop(id = "s1", name = "Near Stop", distanceMeters = 850, platforms = listOf(platformNear))
+        val stopFar = Stop(id = "s2", name = "Far Stop", distanceMeters = 11238, platforms = listOf(platformFar))
+
+        val stateNear = ArrivalsViewState.Content(
+            stops = listOf(stopNear, stopFar),
+            activeStopIndex = 0,
+            activePlatformCode = "A"
+        )
+
+        // Header distance badge formatting
+        assertEquals(850, stateNear.activeDistanceMeters)
+        assertEquals("850m", formatDistance(stateNear.activeDistanceMeters!!))
+
+        val stateFar = ArrivalsViewState.Content(
+            stops = listOf(stopFar, stopNear),
+            activeStopIndex = 0,
+            activePlatformCode = "B"
+        )
+        assertEquals(11238, stateFar.activeDistanceMeters)
+        assertEquals("11.2 km", formatDistance(stateFar.activeDistanceMeters!!))
+
+        // Stop picker rows distance formatting
+        val stopRows = stateNear.stopPickerRows
+        assertEquals("850m", formatDistance(stopRows[0].distanceMeters!!))
+        assertEquals("11.2 km", formatDistance(stopRows[1].distanceMeters!!))
+
+        // Platform picker rows distance formatting
+        val platformState = ArrivalsViewState.Content(
+            stops = listOf(Stop(id = "s1", name = "Multi", distanceMeters = 100, platforms = listOf(platformNear, platformFar))),
+            activeStopIndex = 0,
+            activePlatformCode = "A"
+        )
+        val platformRows = platformState.platformPickerRows
+        assertEquals("850m", formatDistance(platformRows[0].distanceMeters!!))
+        assertEquals("11.2 km", formatDistance(platformRows[1].distanceMeters!!))
+    }
 }
