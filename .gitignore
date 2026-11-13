@@ -58,7 +58,14 @@ ehthumbs.db
 Thumbs.db
 [Dd]esktop.ini
 
+# Python
+__pycache__/
+*.py[cod]
+
 agents/
-.agents/
+.agents/*
+!.agents/skills/
+.agents/skills/*
+!.agents/skills/create-release/
 .worktrees/
 
