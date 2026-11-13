@@ -1,0 +1,168 @@
+name: Production Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'Release version tag (e.g. v1.0.0)'
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build & Publish Production Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Compute dynamic version metadata
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.version_tag }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [[ "$INPUT_TAG" =~ ^v ]]; then
+              TAG="$INPUT_TAG"
+            else
+              TAG="v$INPUT_TAG"
+            fi
+          else
+            TAG="${GITHUB_REF#refs/tags/}"
+          fi
+
+          VERSION_NAME="${TAG#v}"
+          if [[ ! "$VERSION_NAME" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "Error: Tag '$TAG' (version name '$VERSION_NAME') is not valid SemVer (MAJOR.MINOR.PATCH)"
+            exit 1
+          fi
+
+          MAJOR="${BASH_REMATCH[1]}"
+          MINOR="${BASH_REMATCH[2]}"
+          PATCH="${BASH_REMATCH[3]}"
+
+          VERSION_CODE=$(( (MAJOR * 10000) + (MINOR * 100) + PATCH ))
+
+          echo "TAG=${TAG}" >> "$GITHUB_ENV"
+          echo "VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=${VERSION_CODE}" >> "$GITHUB_ENV"
+          echo "Resolved release version: TAG=${TAG}, VERSION_NAME=${VERSION_NAME}, VERSION_CODE=${VERSION_CODE}"
+
+      - name: Run Unit Tests
+        run: ./gradlew testDebugUnitTest
+
+      - name: Setup Keystore
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "Custom release keystore provided. Decoding..."
+            KEYSTORE_DIR="${RUNNER_TEMP}/keystore"
+            mkdir -p "$KEYSTORE_DIR"
+            KEYSTORE_PATH="${KEYSTORE_DIR}/release.keystore"
+            echo "$KEYSTORE_BASE64" | base64 -d > "$KEYSTORE_PATH"
+            echo "RELEASE_KEYSTORE_PATH=${KEYSTORE_PATH}" >> "$GITHUB_ENV"
+            echo "RELEASE_KEYSTORE_PASSWORD=${STORE_PASSWORD}" >> "$GITHUB_ENV"
+            echo "RELEASE_KEY_ALIAS=${KEY_ALIAS}" >> "$GITHUB_ENV"
+            echo "RELEASE_KEY_PASSWORD=${KEY_PASSWORD}" >> "$GITHUB_ENV"
+          else
+            echo "No custom release keystore provided. Falling back to debug signing."
+          fi
+
+      - name: Build Release APK and App Bundle
+        run: ./gradlew assembleRelease bundleRelease -PappVersionCode="${VERSION_CODE}" -PappVersionName="${VERSION_NAME}"
+
+      - name: Upload Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: arrivals-release-${{ env.TAG }}
+          path: |
+            app/build/outputs/apk/release/*.apk
+            app/build/outputs/bundle/release/*.aab
+          retention-days: 30
+
+      - name: Extract Release Notes
+        env:
+          TAG: ${{ env.TAG }}
+          VERSION_NAME: ${{ env.VERSION_NAME }}
+        run: |
+          python3 - << 'EOF'
+          import os
+          import re
+
+          tag = os.environ.get("TAG", "")
+          version_name = os.environ.get("VERSION_NAME", "")
+          changelog_path = "CHANGELOG.md"
+          notes_output = "release_notes.md"
+
+          notes = ""
+          if os.path.exists(changelog_path):
+              with open(changelog_path, "r", encoding="utf-8") as f:
+                  content = f.read()
+
+              pattern = rf"^##\s+\[?(?:v)?{re.escape(version_name)}\]?(?:\s*-\s*.*)?$(.*?)(?=^##\s|\Z)"
+              match = re.search(pattern, content, flags=re.MULTILINE | re.DOTALL)
+              if match:
+                  extracted = match.group(1).strip()
+                  if extracted:
+                      notes = extracted
+
+          if not notes:
+              notes = f"## Arrivals {tag}\n\nAutomated production release for version {version_name}."
+
+          with open(notes_output, "w", encoding="utf-8") as f:
+              f.write(notes + "\n")
+          print("Generated release notes:")
+          print(notes)
+          EOF
+
+      - name: Publish GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ env.TAG }}
+        run: |
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; updating assets with clobber..."
+            gh release upload "${TAG}" \
+              app/build/outputs/apk/release/*.apk \
+              app/build/outputs/bundle/release/*.aab \
+              --clobber
+            gh release edit "${TAG}" --title "${TAG}" --notes-file release_notes.md
+          else
+            echo "Creating release ${TAG}..."
+            gh release create "${TAG}" \
+              app/build/outputs/apk/release/*.apk \
+              app/build/outputs/bundle/release/*.aab \
+              --title "${TAG}" \
+              --notes-file release_notes.md
+          fi
