@@ -13,8 +13,52 @@ permissions:
   contents: write
 
 jobs:
+  check-changes:
+    name: Check for Changes
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine if build is needed
+        id: check
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Workflow dispatched manually. Forcing build."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          LATEST_TAG=$(git tag -l "nightly-*" --sort=-v:refname | head -n 1)
+
+          if [ -z "$LATEST_TAG" ]; then
+            echo "No previous nightly tags found. Building release."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Latest nightly tag: $LATEST_TAG"
+            if COMMITS_COUNT=$(git rev-list "${LATEST_TAG}..HEAD" --count 2>/dev/null); then
+              echo "Commits since $LATEST_TAG: $COMMITS_COUNT"
+              if [ "$COMMITS_COUNT" -gt 0 ]; then
+                echo "New commits detected. Building release."
+                echo "should_build=true" >> "$GITHUB_OUTPUT"
+              else
+                echo "No new commits since $LATEST_TAG. Skipping build."
+                echo "should_build=false" >> "$GITHUB_OUTPUT"
+              fi
+            else
+              echo "Failed to calculate commit diff between $LATEST_TAG and HEAD. Building release as fallback."
+              echo "should_build=true" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
   nightly:
     name: Build & Publish Nightly Release
+    needs: check-changes
+    if: needs.check-changes.outputs.should_build == 'true'
     runs-on: ubuntu-latest
 
     steps:
