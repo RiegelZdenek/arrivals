@@ -36,6 +36,7 @@ interface DeparturesRepository {
 
     fun saveDepartures(response: GolemioDepartureBoardResponse, timestamp: Instant = Instant.now())
     fun getCachedDepartures(): CachedDeparturesResult?
+    fun getLastFetchTime(): Instant?
 
     fun purgeCache()
     fun clearCache() = purgeCache()
@@ -171,6 +172,11 @@ class SharedPreferencesDeparturesRepository(
         }
     }
 
+    override fun getLastFetchTime(): Instant? {
+        val epochMilli = prefs.getLong(KEY_CACHED_TIME, 0L)
+        return if (epochMilli != 0L) Instant.ofEpochMilli(epochMilli) else null
+    }
+
     override fun getCachedDepartures(): CachedDeparturesResult? {
         val jsonString = prefs.getString(KEY_CACHED_PAYLOAD, null) ?: return null
         val epochMilli = prefs.getLong(KEY_CACHED_TIME, 0L)
@@ -263,6 +269,8 @@ class InMemoryDeparturesRepository(
             warningBanner = DeparturesRepository.formatCachedWarning(timestamp, zoneId)
         )
     }
+
+    override fun getLastFetchTime(): Instant? = savedDepartures?.second
 
     override fun purgeCache() {
         savedLocation = null

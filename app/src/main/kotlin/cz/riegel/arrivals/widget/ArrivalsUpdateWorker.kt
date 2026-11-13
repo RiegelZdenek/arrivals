@@ -97,6 +97,8 @@ class ArrivalsUpdateWorker(
         private const val NOTIFICATION_ID = 1001
 
         const val MIN_UPDATE_INTERVAL_MS = 5_000L
+        const val DISPLACEMENT_THRESHOLD_METERS = 50
+        const val LIVE_REFRESH_COOLDOWN_MS = 15_000L
         private val updateMutex = Mutex()
         internal var lastSuccessfulUpdateMillis: Long = 0L
 
@@ -170,6 +172,67 @@ class ArrivalsUpdateWorker(
             val preferredRadius = settingsRepository.getSearchRadius()
             if (freshLocation != null) {
                 departuresRepository.purgeIfOutOfRange(freshLocation, preferredRadius)
+            }
+
+            val lastCoords = departuresRepository.getLastCoordinates()
+            val displacement = if (lastCoords != null && freshLocation != null) {
+                lastCoords.distanceTo(freshLocation)
+            } else {
+                null
+            }
+            val isDisplaced = displacement == null || displacement > DISPLACEMENT_THRESHOLD_METERS
+
+            if (freshLocation != null && !isDisplaced) {
+                val currentWidgetState = WidgetStateManager.getState(appContext, currentTime, departuresRepository)
+                val baseState = currentWidgetState as? ArrivalsViewState.Content
+                    ?: WidgetStateManager.rehydrateFromCache(currentTime, departuresRepository)
+                val activeStop = baseState?.activeStop
+
+                if (activeStop != null) {
+                    val lastFetchMillis = departuresRepository.getLastFetchTime()?.toEpochMilli() ?: 0L
+                    val elapsedMillis = if (lastFetchMillis > 0L) (nowMillis - lastFetchMillis).coerceAtLeast(0L) else Long.MAX_VALUE
+
+                    if (elapsedMillis <= LIVE_REFRESH_COOLDOWN_MS) {
+                        if (currentWidgetState is ArrivalsViewState.Content && currentWidgetState.isRefreshing) {
+                            WidgetStateManager.setState(appContext, currentWidgetState.copy(isRefreshing = false), departuresRepository)
+                        }
+                        WidgetStateManager.tickCountdowns(appContext, currentTime, departuresRepository)
+                        return true
+                    }
+
+                    val dataSource = transitDataSource ?: defaultTransitDataSourceProvider?.invoke(appContext, apiKey) ?: TransitDataSource.create(appContext) { apiKey }
+                    val fetchResult = dataSource.fetchDeparturesForStops(listOf(activeStop.name))
+                    if (fetchResult.isSuccess) {
+                        val apiSuccessResponse = fetchResult.getOrThrow()
+                        if (apiSuccessResponse.departures.isNotEmpty() || apiSuccessResponse.stops.isNotEmpty()) {
+                            departuresRepository.saveDepartures(apiSuccessResponse, currentTime)
+                            val finalState = engine.reduce(
+                                baseState,
+                                ArrivalsAction.IngestApiResponse(
+                                    response = apiSuccessResponse,
+                                    userCoordinates = freshLocation,
+                                    referenceTime = currentTime,
+                                    cachedWarning = null,
+                                    searchRadius = preferredRadius
+                                )
+                            )
+                            WidgetStateManager.setState(appContext, finalState, departuresRepository)
+                            WidgetStateManager.updateAllWidgets(appContext)
+                            lastSuccessfulUpdateMillis = nowMillis
+                            return true
+                        }
+                    }
+
+                    restoreCachedDepartures(
+                        context = appContext,
+                        now = currentTime,
+                        userCoords = freshLocation,
+                        fallbackErrorMessage = fetchResult.exceptionOrNull()?.message,
+                        repository = departuresRepository,
+                        searchRadius = preferredRadius
+                    )
+                    return false
+                }
             }
 
             val locationResolution = departuresRepository.resolveLocation(

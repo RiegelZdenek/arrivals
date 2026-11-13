@@ -48,7 +48,12 @@ class ArrivalsWidgetIntegrationTest {
 
     private lateinit var context: Context
 
-    private fun sampleStop(id: String, name: String, platforms: List<String>) = Stop(
+    private fun sampleStop(
+        id: String,
+        name: String,
+        platforms: List<String>,
+        departureTime: Instant = Instant.now()
+    ) = Stop(
         id = id,
         name = name,
         lat = 50.075,
@@ -62,8 +67,8 @@ class ArrivalsWidgetIntegrationTest {
                         id = "dep_1",
                         line = Line("22", TransportMode.Tram),
                         terminus = "Bílá Hora",
-                        scheduledTime = Instant.now(),
-                        predictedTime = Instant.now(),
+                        scheduledTime = departureTime,
+                        predictedTime = departureTime,
                         countdown = CountdownDisplay(3, "3 min", false),
                         delay = Delay(1, true)
                     )
@@ -1015,5 +1020,272 @@ class ArrivalsWidgetIntegrationTest {
         job.join()
 
         assertEquals("Manual refresh should not be throttled", 1, callCount)
+    }
+
+    @Test
+    fun movingCommuter_greaterThan50mDisplacement_triggersStopDiscoveryAndAutoSnapsToClosest() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        org.robolectric.Shadows.shadowOf(app).grantPermissions(android.Manifest.permission.ACCESS_FINE_LOCATION)
+
+        val settingsRepo = SettingsRepository(context)
+        settingsRepo.saveApiKey("test-key")
+        settingsRepo.saveSearchRadius(300)
+        settingsRepo.saveSimulatedHubIndex(0) // Use real GPS fix
+
+        val repository = InMemoryDeparturesRepository()
+        val now = Instant.parse("2026-11-13T10:00:00Z")
+
+        // Commuter was previously at Muzeum: (50.0755, 14.4302)
+        val muzeumCoords = Coordinates(50.0755, 14.4302)
+        val muzeumStop = sampleStop("s_muzeum", "Muzeum", listOf("A", "B"))
+        repository.saveLocation(muzeumCoords, observedAt = now.minusSeconds(60))
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(muzeumStop),
+                activeStopIndex = 0,
+                activePlatformCode = "A",
+                userCoordinates = muzeumCoords
+            ),
+            repository = repository
+        )
+
+        // Commuter has moved ~1.9km to Lipanská: (50.0839, 14.4534), displacement > 50m
+        val lipanskaCoords = Coordinates(50.0839, 14.4534)
+        val lipanskaResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "s_lipanska", stopName = "Lipanská", platformCode = "A", stopLat = lipanskaCoords.lat, stopLon = lipanskaCoords.lon)
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.plusSeconds(180).toString(),
+                        predicted = now.plusSeconds(180).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "s_lipanska", name = "Lipanská", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "9", type = 0),
+                    trip = GolemioTripDto(headsign = "Spojovací")
+                )
+            )
+        )
+
+        val fakeDataSource = FakeTransitDataSource()
+        fakeDataSource.defaultResult = Result.success(lipanskaResponse)
+
+        val mockLocation = android.location.Location("gps").apply {
+            latitude = lipanskaCoords.lat
+            longitude = lipanskaCoords.lon
+            time = now.toEpochMilli()
+            accuracy = 10f
+        }
+        val fakeResolver = object : LocationResolver {
+            override suspend fun resolveLocation(highAccuracyTimeoutMs: Long, balancedTimeoutMs: Long): android.location.Location? = mockLocation
+            override suspend fun getLastKnownLocation(): android.location.Location? = mockLocation
+        }
+
+        val result = ArrivalsUpdateWorker.executeUpdate(
+            appContext = context,
+            settingsRepository = settingsRepo,
+            departuresRepository = repository,
+            locationResolver = fakeResolver,
+            currentTime = now,
+            transitDataSource = fakeDataSource,
+            force = true
+        )
+
+        assertTrue("Update must succeed", result)
+        assertEquals("Nearby stop discovery must be called", 1, fakeDataSource.nearbyCalls.size)
+        assertEquals("Stop-specific live departures must not be called on displacement", 0, fakeDataSource.stopsCalls.size)
+        assertEquals(300, fakeDataSource.nearbyCalls.first().radiusMeters)
+
+        val state = WidgetStateManager.getState(context, now, repository = repository) as ArrivalsViewState.Content
+        assertEquals("Auto-snapped to new closest stop", "Lipanská", state.activeStop.name)
+        assertEquals("A", state.activePlatformCode)
+        assertEquals(lipanskaCoords, repository.getLastCoordinates())
+    }
+
+    @Test
+    fun stationaryCommuter_lessThan50mDisplacement_withMoreThan15sElapsed_queriesLiveDeparturesForActiveStop() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        org.robolectric.Shadows.shadowOf(app).grantPermissions(android.Manifest.permission.ACCESS_FINE_LOCATION)
+
+        val settingsRepo = SettingsRepository(context)
+        settingsRepo.saveApiKey("test-key")
+        settingsRepo.saveSearchRadius(300)
+        settingsRepo.saveSimulatedHubIndex(0)
+
+        val repository = InMemoryDeparturesRepository()
+        val t0 = Instant.parse("2026-11-13T10:00:00Z")
+        val now = t0.plusSeconds(20) // 20s elapsed (> 15s cooldown)
+
+        // Commuter at Muzeum: (50.0755, 14.4302)
+        val muzeumCoords = Coordinates(50.0755, 14.4302)
+        val initialResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "s_muzeum", stopName = "Muzeum", platformCode = "A", stopLat = muzeumCoords.lat, stopLon = muzeumCoords.lon)
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = t0.plusSeconds(300).toString(),
+                        predicted = t0.plusSeconds(300).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "s_muzeum", name = "Muzeum", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "A", type = 1),
+                    trip = GolemioTripDto(headsign = "Depo Hostivař")
+                )
+            )
+        )
+        repository.saveLocation(muzeumCoords, observedAt = t0)
+        repository.saveDepartures(initialResponse, timestamp = t0)
+
+        val muzeumStop = sampleStop("s_muzeum", "Muzeum", listOf("A"), departureTime = t0.plusSeconds(120))
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(muzeumStop),
+                activeStopIndex = 0,
+                activePlatformCode = "A",
+                userCoordinates = muzeumCoords
+            ),
+            repository = repository
+        )
+
+        // Fresh location fix drifted ~13m: (50.0756, 14.4303), displacement <= 50m
+        val driftedCoords = Coordinates(50.0756, 14.4303)
+        val updatedResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "s_muzeum", stopName = "Muzeum", platformCode = "A", stopLat = muzeumCoords.lat, stopLon = muzeumCoords.lon)
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = now.plusSeconds(120).toString(),
+                        predicted = now.plusSeconds(120).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "s_muzeum", name = "Muzeum", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "A", type = 1),
+                    trip = GolemioTripDto(headsign = "Nemocnice Motol")
+                )
+            )
+        )
+
+        val fakeDataSource = FakeTransitDataSource()
+        fakeDataSource.setResponseForStop("Muzeum", Result.success(updatedResponse))
+
+        val mockLocation = android.location.Location("gps").apply {
+            latitude = driftedCoords.lat
+            longitude = driftedCoords.lon
+            time = now.toEpochMilli()
+            accuracy = 10f
+        }
+        val fakeResolver = object : LocationResolver {
+            override suspend fun resolveLocation(highAccuracyTimeoutMs: Long, balancedTimeoutMs: Long): android.location.Location? = mockLocation
+            override suspend fun getLastKnownLocation(): android.location.Location? = mockLocation
+        }
+
+        val result = ArrivalsUpdateWorker.executeUpdate(
+            appContext = context,
+            settingsRepository = settingsRepo,
+            departuresRepository = repository,
+            locationResolver = fakeResolver,
+            currentTime = now,
+            transitDataSource = fakeDataSource,
+            force = true
+        )
+
+        assertTrue("Update must succeed", result)
+        assertEquals("Stop discovery must be bypassed for stationary commuter", 0, fakeDataSource.nearbyCalls.size)
+        assertEquals("Live departures must be queried for active stop", 1, fakeDataSource.stopsCalls.size)
+        assertEquals(listOf("Muzeum"), fakeDataSource.stopsCalls.first().stopNames)
+
+        val state = WidgetStateManager.getState(context, now, repository = repository) as ArrivalsViewState.Content
+        assertEquals("Muzeum", state.activeStop.name)
+        assertEquals("Nemocnice Motol", state.activeDepartures.first().terminus)
+        assertFalse(state.isRefreshing)
+    }
+
+    @Test
+    fun stationaryCommuter_lessThan50mDisplacement_withLessThan15sElapsed_ticksCountdownsWithoutApiCall() = runBlocking {
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        org.robolectric.Shadows.shadowOf(app).grantPermissions(android.Manifest.permission.ACCESS_FINE_LOCATION)
+
+        val settingsRepo = SettingsRepository(context)
+        settingsRepo.saveApiKey("test-key")
+        settingsRepo.saveSearchRadius(300)
+        settingsRepo.saveSimulatedHubIndex(0)
+
+        val repository = InMemoryDeparturesRepository()
+        val t0 = Instant.parse("2026-11-13T10:00:00Z")
+        val now = t0.plusSeconds(8) // 8s elapsed (<= 15s cooldown)
+
+        // Commuter at Muzeum: (50.0755, 14.4302)
+        val muzeumCoords = Coordinates(50.0755, 14.4302)
+        val initialResponse = GolemioDepartureBoardResponse(
+            stops = listOf(
+                GolemioStopDto(stopId = "s_muzeum", stopName = "Muzeum", platformCode = "A", stopLat = muzeumCoords.lat, stopLon = muzeumCoords.lon)
+            ),
+            departures = listOf(
+                GolemioDepartureDto(
+                    departureTimestamp = GolemioTimestampDto(
+                        scheduled = t0.plusSeconds(120).toString(),
+                        predicted = t0.plusSeconds(120).toString()
+                    ),
+                    stop = GolemioDepartureStopDto(id = "s_muzeum", name = "Muzeum", platformCode = "A"),
+                    route = GolemioRouteDto(shortName = "A", type = 1),
+                    trip = GolemioTripDto(headsign = "Depo Hostivař")
+                )
+            )
+        )
+        repository.saveLocation(muzeumCoords, observedAt = t0)
+        repository.saveDepartures(initialResponse, timestamp = t0)
+
+        val muzeumStop = sampleStop("s_muzeum", "Muzeum", listOf("A"), departureTime = t0.plusSeconds(120))
+        WidgetStateManager.setState(
+            context,
+            ArrivalsViewState.Content(
+                stops = listOf(muzeumStop),
+                activeStopIndex = 0,
+                activePlatformCode = "A",
+                userCoordinates = muzeumCoords,
+                isRefreshing = true
+            ),
+            repository = repository
+        )
+
+        // Fresh location fix drifted ~13m: (50.0756, 14.4303), displacement <= 50m
+        val driftedCoords = Coordinates(50.0756, 14.4303)
+        val fakeDataSource = FakeTransitDataSource()
+
+        val mockLocation = android.location.Location("gps").apply {
+            latitude = driftedCoords.lat
+            longitude = driftedCoords.lon
+            time = now.toEpochMilli()
+            accuracy = 10f
+        }
+        val fakeResolver = object : LocationResolver {
+            override suspend fun resolveLocation(highAccuracyTimeoutMs: Long, balancedTimeoutMs: Long): android.location.Location? = mockLocation
+            override suspend fun getLastKnownLocation(): android.location.Location? = mockLocation
+        }
+
+        val result = ArrivalsUpdateWorker.executeUpdate(
+            appContext = context,
+            settingsRepository = settingsRepo,
+            departuresRepository = repository,
+            locationResolver = fakeResolver,
+            currentTime = now,
+            transitDataSource = fakeDataSource,
+            force = true
+        )
+
+        assertTrue("Update must succeed", result)
+        assertEquals("Stop discovery must be bypassed", 0, fakeDataSource.nearbyCalls.size)
+        assertEquals("Live departures API call must NOT be dispatched within 15s cooldown", 0, fakeDataSource.stopsCalls.size)
+
+        val state = WidgetStateManager.getState(context, now, repository = repository) as ArrivalsViewState.Content
+        assertEquals("Muzeum", state.activeStop.name)
+        assertFalse("isRefreshing must be cleared", state.isRefreshing)
+        // 180s - 8s = 172s -> 2 min remaining
+        assertEquals(2L, state.activeDepartures.first().countdown.minutesRemaining)
     }
 }
