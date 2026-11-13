@@ -1,5 +1,6 @@
 package cz.riegel.arrivals.widget
 
+import java.util.Locale
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -238,6 +239,13 @@ object DeparturesListDimens {
 fun departureItemId(departure: Departure): Long = departure.id.hashCode().toLong()
 fun stopPickerItemId(row: StopPickerRow): Long = row.stopIndex.toLong()
 fun platformPickerItemId(row: PlatformPickerRow): Long = row.code.hashCode().toLong()
+
+fun formatDistance(distanceMeters: Int): String =
+    if (distanceMeters < 1_000) {
+        "${distanceMeters}m"
+    } else {
+        String.format(Locale.ROOT, "%.1f km", distanceMeters / 1000.0)
+    }
 
 fun maxDeparturesForHeight(height: Dp): Int =
     if (height < 180.dp) {
@@ -730,7 +738,7 @@ fun DistanceBadge(distanceMeters: Int, action: Action) {
             .clickable(action)
     ) {
         Text(
-            text = "${distanceMeters}m",
+            text = formatDistance(distanceMeters),
             style = TextStyle(
                 color = androidx.glance.unit.ColorProvider(Color(0xFFB0B0C0)),
                 fontSize = 11.sp
