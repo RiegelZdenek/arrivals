@@ -97,16 +97,46 @@ class ArrivalsWidgetReceiver : GlanceAppWidgetReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         WidgetCountdownTicker.ensureRegistered(context)
-        if (intent.action == WidgetCountdownTicker.ACTION_TICK_COUNTDOWN) {
-            val pendingResult = goAsync()
-            CoroutineScope(Dispatchers.Default).launch {
-                try {
-                    WidgetStateManager.tickCountdowns(context.applicationContext)
-                } finally {
-                    pendingResult.finish()
+        when (intent.action) {
+            WidgetCountdownTicker.ACTION_TICK_COUNTDOWN -> {
+                val pendingResult = try { goAsync() } catch (_: Exception) { null }
+                WidgetCountdownTicker.lastJob = WidgetCountdownTicker.scope.launch {
+                    try {
+                        WidgetStateManager.tickCountdowns(context.applicationContext)
+                    } finally {
+                        try {
+                            pendingResult?.finish()
+                        } catch (_: Exception) {}
+                    }
                 }
+                return
             }
-            return
+            Intent.ACTION_USER_PRESENT -> {
+                val pendingResult = try { goAsync() } catch (_: Exception) { null }
+                WidgetCountdownTicker.lastJob = WidgetCountdownTicker.scope.launch {
+                    try {
+                        WidgetCountdownTicker.handleUserPresent(context.applicationContext)
+                    } finally {
+                        try {
+                            pendingResult?.finish()
+                        } catch (_: Exception) {}
+                    }
+                }
+                return
+            }
+            Intent.ACTION_SCREEN_ON -> {
+                val pendingResult = try { goAsync() } catch (_: Exception) { null }
+                WidgetCountdownTicker.lastJob = WidgetCountdownTicker.scope.launch {
+                    try {
+                        WidgetCountdownTicker.handleScreenOn(context.applicationContext)
+                    } finally {
+                        try {
+                            pendingResult?.finish()
+                        } catch (_: Exception) {}
+                    }
+                }
+                return
+            }
         }
         super.onReceive(context, intent)
     }
