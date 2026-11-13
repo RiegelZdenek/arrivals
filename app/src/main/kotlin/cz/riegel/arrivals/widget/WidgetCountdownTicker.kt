@@ -9,23 +9,63 @@ import android.content.IntentFilter
 import android.os.Build
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
 
 object WidgetCountdownTicker {
     const val ACTION_TICK_COUNTDOWN = "cz.riegel.arrivals.action.TICK_COUNTDOWN"
+    const val SCREEN_ON_THROTTLE_MS = 180_000L // 3 minutes
     private const val ALARM_REQUEST_CODE = 4201
 
     private val isRegistered = AtomicBoolean(false)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    internal var scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    private val timeTickReceiver = object : BroadcastReceiver() {
+    internal var clock: () -> Long = { System.currentTimeMillis() }
+    internal var lastScreenOnUpdateMillis: Long = 0L
+    internal var lastJob: Job? = null
+
+    suspend fun handleUserPresent(context: Context) {
+        WidgetStateManager.tickCountdowns(context)
+        scheduleNextMinuteAlarm(context)
+        ArrivalsUpdateWorker.enqueueExpeditedOneTimeWork(context)
+    }
+
+    suspend fun handleScreenOn(context: Context) {
+        WidgetStateManager.tickCountdowns(context)
+        scheduleNextMinuteAlarm(context)
+        val now = clock()
+        if (lastScreenOnUpdateMillis == 0L || (now - lastScreenOnUpdateMillis) >= SCREEN_ON_THROTTLE_MS) {
+            lastScreenOnUpdateMillis = now
+            ArrivalsUpdateWorker.enqueueExpeditedOneTimeWork(context)
+        }
+    }
+
+    suspend fun handleTimeTick(context: Context) {
+        WidgetStateManager.tickCountdowns(context)
+        scheduleNextMinuteAlarm(context)
+    }
+
+    internal val timeTickReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent?) {
             val appCtx = context.applicationContext
-            scope.launch {
-                WidgetStateManager.tickCountdowns(appCtx)
-                scheduleNextMinuteAlarm(appCtx)
+            when (intent?.action) {
+                Intent.ACTION_USER_PRESENT -> {
+                    lastJob = scope.launch {
+                        handleUserPresent(appCtx)
+                    }
+                }
+                Intent.ACTION_SCREEN_ON -> {
+                    lastJob = scope.launch {
+                        handleScreenOn(appCtx)
+                    }
+                }
+                else -> {
+                    lastJob = scope.launch {
+                        handleTimeTick(appCtx)
+                    }
+                }
             }
         }
     }
@@ -42,7 +82,7 @@ object WidgetCountdownTicker {
                     addAction(Intent.ACTION_USER_PRESENT)
                 }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    appCtx.registerReceiver(timeTickReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+                    appCtx.registerReceiver(timeTickReceiver, filter, Context.RECEIVER_EXPORTED)
                 } else {
                     appCtx.registerReceiver(timeTickReceiver, filter)
                 }
@@ -51,6 +91,28 @@ object WidgetCountdownTicker {
             }
         }
         scheduleNextMinuteAlarm(appCtx)
+    }
+
+    fun unregister(context: Context) {
+        val appCtx = context.applicationContext
+        if (isRegistered.compareAndSet(true, false)) {
+            try {
+                appCtx.unregisterReceiver(timeTickReceiver)
+            } catch (_: Exception) {}
+        }
+        cancelMinuteAlarm(appCtx)
+    }
+
+    fun resetForTesting(context: Context? = null) {
+        if (context != null && isRegistered.get()) {
+            try {
+                context.applicationContext.unregisterReceiver(timeTickReceiver)
+            } catch (_: Exception) {}
+        }
+        isRegistered.set(false)
+        lastScreenOnUpdateMillis = 0L
+        clock = { System.currentTimeMillis() }
+        lastJob = null
     }
 
     fun scheduleNextMinuteAlarm(context: Context) {
